@@ -328,12 +328,7 @@ impl Sidebar {
         let route = row.route.clone();
 
         div()
-            // Rows can appear in multiple sections (e.g. Unread + Channels/DMs). Keep ids unique so
-            // hit-testing and click dispatch remain reliable.
-            .id(SharedString::from(format!(
-                "sidebar-{}-{route_label}",
-                section_id.0
-            )))
+            .id(Self::row_element_id(section_id, &route_label))
             .w_full()
             .rounded_md()
             .hover(|s| s.bg(subtle_surface()))
@@ -368,6 +363,10 @@ impl Sidebar {
                 d.child(div().w(px(6.)).h(px(6.)).rounded_full().bg(rgb(accent())))
             })
             .into_any_element()
+    }
+
+    fn row_element_id(section_id: &SidebarSectionId, route_label: &str) -> SharedString {
+        SharedString::from(format!("sidebar-{}-{route_label}", section_id.0))
     }
 
     fn leading_element(
@@ -415,5 +414,23 @@ fn command_shortcut_label(key: &str) -> String {
         format!("⌘{key}")
     } else {
         format!("Cmd+{key}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Sidebar;
+    use crate::domain::ids::SidebarSectionId;
+
+    #[test]
+    fn row_element_ids_include_section_scope() {
+        let route_label = "dm:alice";
+
+        let unread_id = Sidebar::row_element_id(&SidebarSectionId::new("unread"), route_label);
+        let dms_id = Sidebar::row_element_id(&SidebarSectionId::new("dms"), route_label);
+
+        assert_ne!(unread_id, dms_id);
+        assert_eq!(unread_id.as_ref(), "sidebar-unread-dm:alice");
+        assert_eq!(dms_id.as_ref(), "sidebar-dms-dm:alice");
     }
 }
