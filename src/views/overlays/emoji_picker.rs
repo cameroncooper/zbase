@@ -247,23 +247,34 @@ fn render_sections(
     if !frequent_items.is_empty() {
         content = content
             .child(section_title("Frequently used"))
-            .child(render_grid(frequent_items, picker.selected_skin_tone, cx));
+            .child(render_grid(
+                "freq",
+                frequent_items,
+                picker.selected_skin_tone,
+                cx,
+            ));
     }
 
-    for group in groups {
+    for (gi, group) in groups.iter().enumerate() {
         let stock_items = group
             .emojis()
             .map(EmojiPickerItem::Stock)
             .collect::<Vec<EmojiPickerItem>>();
+        let section = format!("g{gi}");
         content = content
-            .child(section_title(group_label(group)))
-            .child(render_grid(&stock_items, picker.selected_skin_tone, cx));
+            .child(section_title(group_label(*group)))
+            .child(render_grid(&section, &stock_items, picker.selected_skin_tone, cx));
     }
 
     if !custom_items.is_empty() {
         content = content
             .child(section_title("Custom emoji"))
-            .child(render_grid(custom_items, picker.selected_skin_tone, cx));
+            .child(render_grid(
+                "custom",
+                custom_items,
+                picker.selected_skin_tone,
+                cx,
+            ));
     }
 
     div()
@@ -302,7 +313,7 @@ fn render_search_results(
                 .child("No emoji matches"),
         );
     } else {
-        content = content.child(render_grid(results, picker.selected_skin_tone, cx));
+        content = content.child(render_grid("search", results, picker.selected_skin_tone, cx));
     }
 
     div()
@@ -317,6 +328,7 @@ fn render_search_results(
 }
 
 fn render_grid(
+    section: &str,
     items: &[EmojiPickerItem],
     tone: Option<emojis::SkinTone>,
     cx: &mut Context<AppWindow>,
@@ -336,7 +348,7 @@ fn render_grid(
             let click_item = item.clone();
             Some(
                 div()
-                    .id(SharedString::from(format!("emoji-cell-{key}")))
+                    .id(SharedString::from(format!("{section}-{key}")))
                     .w(px(CELL_SIZE_PX))
                     .h(px(CELL_SIZE_PX))
                     .rounded_sm()

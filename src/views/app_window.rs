@@ -6114,6 +6114,30 @@ impl AppWindow {
         }
     }
 
+    pub(crate) fn show_toolbar_immediately(
+        &mut self,
+        message_id: MessageId,
+        cursor_x: f32,
+        cursor_y: f32,
+        is_thread: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if self.timeline_interactions_blocked_by_overlay() {
+            return;
+        }
+        self.cancel_hover_clear();
+        self.hover_settle_seq = self.hover_settle_seq.wrapping_add(1);
+        self.models.timeline.hovered_message_id = Some(message_id);
+        self.models.timeline.hovered_message_is_thread = Some(is_thread);
+        self.models.timeline.hovered_message_anchor_x = Some(cursor_x);
+        self.models.timeline.hovered_message_anchor_y = Some(cursor_y);
+        self.models.timeline.hovered_message_window_left = None;
+        self.models.timeline.hovered_message_window_top = None;
+        self.models.timeline.hovered_message_window_width = None;
+        self.models.timeline.hover_toolbar_settled = true;
+        self.refresh(cx);
+    }
+
     fn schedule_hover_settle(&mut self, cx: &mut Context<Self>) {
         self.hover_settle_seq = self.hover_settle_seq.wrapping_add(1);
         let seq = self.hover_settle_seq;
