@@ -29,7 +29,8 @@ use crate::{
         format_duration_ms, glass_surface_strong,
         inline_markdown::{InlineMarkdownConfig, apply_inline_markdown, remap_source_byte_range},
         input::TextField,
-        is_dark_theme, mention_colors_for_user, mention_soft, mono_font_family, panel_alt_bg,
+        is_dark_theme, mention_colors_for_user, mention_soft, mono_font_family, mono_font_size,
+        panel_alt_bg,
         panel_alt_surface,
         play_icon,
         selectable_text::{
@@ -2184,6 +2185,7 @@ fn render_fragment(
             div()
                 .text_sm()
                 .font_family(mono_font_family())
+                .text_size(mono_font_size())
                 .line_height(px(22.))
                 .text_color(rgb(text_primary()))
                 .child(selectable)
@@ -2243,6 +2245,7 @@ fn render_fragment(
                 .bg(subtle_surface())
                 .text_sm()
                 .font_family(mono_font_family())
+                .text_size(mono_font_size())
                 .line_height(px(22.))
                 .text_color(rgb(text_primary()))
                 .child(selectable)

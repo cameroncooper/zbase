@@ -225,6 +225,10 @@ pub fn mono_font_family() -> &'static str {
     }
 }
 
+pub fn mono_font_size() -> gpui::Pixels {
+    px(12.5)
+}
+
 pub fn text_secondary() -> u32 {
     palette().text_secondary
 }

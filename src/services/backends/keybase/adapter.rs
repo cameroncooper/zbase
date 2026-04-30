@@ -212,6 +212,12 @@ impl ChatBackend for KeybaseBackend {
                     &conversation_id,
                     &mut cached_messages,
                 );
+                apply_regular_delete_tombstones(
+                    &self.local_store,
+                    &conversation_id,
+                    self.inbound_sender.as_ref(),
+                    &mut cached_messages,
+                );
                 if filtered_placeholder_count > 0
                     && let Some(sender) = self.inbound_sender.clone()
                 {
@@ -592,6 +598,12 @@ impl ChatBackend for KeybaseBackend {
                             &conversation_id,
                             &mut fetched.messages,
                         );
+                        apply_regular_delete_tombstones(
+                            &self.local_store,
+                            &conversation_id,
+                            self.inbound_sender.as_ref(),
+                            &mut fetched.messages,
+                        );
                         let message_ids = fetched
                             .messages
                             .iter()
@@ -708,6 +720,12 @@ impl ChatBackend for KeybaseBackend {
                         strip_reaction_delete_tombstones(
                             &self.local_store,
                             &conversation_id,
+                            &mut fetched_messages,
+                        );
+                        apply_regular_delete_tombstones(
+                            &self.local_store,
+                            &conversation_id,
+                            self.inbound_sender.as_ref(),
                             &mut fetched_messages,
                         );
                         let message_ids = fetched_messages
@@ -2026,6 +2044,12 @@ fn run_listener(
                             reaction_removed_event_for_live_delete(&local_store, &live_message)
                         {
                             if sender.send(reaction_removed_event).is_err() {
+                                break;
+                            }
+                        } else if let Some(delete_event) =
+                            regular_message_delete_event(&local_store, &live_message)
+                        {
+                            if sender.send(delete_event).is_err() {
                                 break;
                             }
                         } else {
@@ -4536,6 +4560,12 @@ fn run_load_conversation(
             let reaction_delta_ms = reaction_delta_started.elapsed().as_millis();
 
             strip_reaction_delete_tombstones(&local_store, &conversation_id, &mut messages);
+            apply_regular_delete_tombstones(
+                &local_store,
+                &conversation_id,
+                Some(&sender),
+                &mut messages,
+            );
             strip_reaction_delete_tombstones_from_deltas(&mut messages, &reaction_deltas);
             let reaction_hydrate_started = Instant::now();
             let message_ids = messages
@@ -4896,6 +4926,12 @@ fn run_load_older_messages(
             reaction_delete_events = reaction_op_delete_events(&fetched.reaction_deltas);
             let mut fetched_messages = fetched.messages;
             strip_reaction_delete_tombstones(&local_store, &conversation_id, &mut fetched_messages);
+            apply_regular_delete_tombstones(
+                &local_store,
+                &conversation_id,
+                Some(&sender),
+                &mut fetched_messages,
+            );
             let message_ids = fetched_messages
                 .iter()
                 .map(|message| message.id.clone())
@@ -5097,6 +5133,12 @@ fn run_backfill_thread_history(
 
         let mut page_messages = page.messages;
         strip_reaction_delete_tombstones(&local_store, &conversation_id, &mut page_messages);
+        apply_regular_delete_tombstones(
+            &local_store,
+            &conversation_id,
+            Some(&sender),
+            &mut page_messages,
+        );
         let newest_id = page_messages.last().map(|message| message.id.clone());
         let message_ids = page_messages
             .iter()
@@ -6287,6 +6329,7 @@ fn warm_recent_conversation_messages_for_thread(
 
     persist_reaction_deltas(None, local_store, &page.reaction_deltas);
     strip_reaction_delete_tombstones(local_store, conversation_id, &mut page.messages);
+    apply_regular_delete_tombstones(local_store, conversation_id, None, &mut page.messages);
     let message_ids = page
         .messages
         .iter()
@@ -8568,6 +8611,54 @@ fn strip_reaction_delete_tombstones(
     });
 }
 
+fn apply_regular_delete_tombstones(
+    local_store: &LocalStore,
+    conversation_id: &ConversationId,
+    sender: Option<&Sender<BackendEvent>>,
+    messages: &mut Vec<MessageRecord>,
+) {
+    let mut deleted_ids = HashSet::new();
+    for message in messages.iter() {
+        if let Some(ChatEvent::MessageDeleted {
+            target_message_id: Some(target),
+        }) = &message.event
+        {
+            if local_store
+                .get_message_reaction_op(conversation_id, target)
+                .ok()
+                .flatten()
+                .is_none()
+            {
+                let _ = local_store.delete_message(conversation_id, target);
+                deleted_ids.insert(target.clone());
+            }
+        }
+    }
+    if deleted_ids.is_empty() {
+        return;
+    }
+    messages.retain(|message| {
+        if deleted_ids.contains(&message.id) {
+            return false;
+        }
+        if let Some(ChatEvent::MessageDeleted {
+            target_message_id: Some(target),
+        }) = &message.event
+        {
+            return !deleted_ids.contains(target);
+        }
+        true
+    });
+    if let Some(sender) = sender {
+        for message_id in &deleted_ids {
+            let _ = sender.send(BackendEvent::MessageDeleted {
+                conversation_id: conversation_id.clone(),
+                message_id: message_id.clone(),
+            });
+        }
+    }
+}
+
 fn strip_reaction_delete_tombstones_from_deltas(
     messages: &mut Vec<MessageRecord>,
     deltas: &[MessageReactionDelta],
@@ -8759,6 +8850,23 @@ fn reaction_removed_event_for_live_delete(
         message_id: removed.target_message_id,
         emoji: removed.emoji,
         actor_id: removed.actor_id,
+    })
+}
+
+fn regular_message_delete_event(
+    local_store: &LocalStore,
+    message: &MessageRecord,
+) -> Option<BackendEvent> {
+    let ChatEvent::MessageDeleted {
+        target_message_id: Some(target_message_id),
+    } = message.event.as_ref()?
+    else {
+        return None;
+    };
+    let _ = local_store.delete_message(&message.conversation_id, target_message_id);
+    Some(BackendEvent::MessageDeleted {
+        conversation_id: message.conversation_id.clone(),
+        message_id: target_message_id.clone(),
     })
 }
 
@@ -11682,7 +11790,16 @@ async fn hydrate_thread_attachment_paths(
 fn message_needs_image_attachment_hydration(message: &MessageRecord) -> bool {
     message.attachments.iter().any(|attachment| {
         attachment.kind == AttachmentKind::Image
-            && !attachment_has_renderable_image_source(attachment)
+            && (!attachment
+                .source
+                .as_ref()
+                .is_some_and(attachment_source_renderable_for_image)
+                || !attachment
+                    .preview
+                    .as_ref()
+                    .is_some_and(|preview| {
+                        attachment_source_renderable_for_image(&preview.source)
+                    }))
     })
 }
 
@@ -11706,16 +11823,25 @@ fn message_needs_file_attachment_hydration(message: &MessageRecord) -> bool {
 
 fn image_attachment_hydration_flags(message: &MessageRecord) -> (bool, bool) {
     let needs_source_hydration = message.attachments.iter().any(|attachment| {
-        attachment.kind == AttachmentKind::Image
-            && !attachment_has_renderable_image_source(attachment)
-            && !attachment
-                .source
-                .as_ref()
-                .is_some_and(attachment_source_renderable_for_image)
+        if attachment.kind != AttachmentKind::Image {
+            return false;
+        }
+        let source_renderable = attachment
+            .source
+            .as_ref()
+            .is_some_and(attachment_source_renderable_for_image);
+        if !source_renderable {
+            return true;
+        }
+        // Source and preview point to the same file — source is just a copy
+        // of the preview thumbnail and needs to be replaced with the full file.
+        if let (Some(source), Some(preview)) = (&attachment.source, &attachment.preview) {
+            return source == &preview.source;
+        }
+        false
     });
     let needs_preview_hydration = message.attachments.iter().any(|attachment| {
         attachment.kind == AttachmentKind::Image
-            && !attachment_has_renderable_image_source(attachment)
             && !attachment
                 .preview
                 .as_ref()
@@ -11788,18 +11914,19 @@ async fn hydrate_attachment_paths_for_messages(
                     });
                     attachment_updated = true;
                 }
-                let source_renderable = attachment
-                    .source
-                    .as_ref()
-                    .is_some_and(attachment_source_renderable_for_image);
+                let source_is_same_as_preview = attachment.source.as_ref().is_some_and(
+                    |s| attachment.preview.as_ref().is_some_and(|p| s == &p.source),
+                );
+                let source_renderable = !source_is_same_as_preview
+                    && attachment
+                        .source
+                        .as_ref()
+                        .is_some_and(attachment_source_renderable_for_image);
                 if !source_renderable {
-                    let Some(file_path) =
-                        full_file_path.clone().or_else(|| preview_file_path.clone())
-                    else {
-                        continue;
-                    };
-                    attachment.source = Some(AttachmentSource::LocalPath(file_path));
-                    attachment_updated = true;
+                    if let Some(file_path) = full_file_path.clone() {
+                        attachment.source = Some(AttachmentSource::LocalPath(file_path));
+                        attachment_updated = true;
+                    }
                 }
             } else if attachment.kind == AttachmentKind::Video && needs_video_hydration {
                 let already_has_local_source = attachment.source.as_ref().is_some_and(
@@ -11846,16 +11973,6 @@ async fn hydrate_attachment_paths_for_messages(
     updated_ids
 }
 
-fn attachment_has_renderable_image_source(attachment: &AttachmentSummary) -> bool {
-    attachment
-        .source
-        .as_ref()
-        .is_some_and(attachment_source_renderable_for_image)
-        || attachment
-            .preview
-            .as_ref()
-            .is_some_and(|preview| attachment_source_renderable_for_image(&preview.source))
-}
 
 fn attachment_source_renderable_for_image(source: &AttachmentSource) -> bool {
     match source {

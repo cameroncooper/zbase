@@ -21,7 +21,8 @@ use crate::{
         badge, clipboard_icon, copy_icon, crown_icon, danger, format_duration_ms,
         glass_surface_dark, hash_icon,
         inline_markdown::{InlineMarkdownConfig, apply_inline_markdown, remap_source_byte_range},
-        mention_soft, mono_font_family, panel_alt_bg, panel_bg, pin_icon, play_icon, plus_icon,
+        mention_soft, mono_font_family, mono_font_size, panel_alt_bg, panel_bg, pin_icon,
+        play_icon, plus_icon,
         selectable_text::{
             InlineAttachment, LinkRange, SelectableText, StyledRange, resolve_selectable_text,
             resolve_selectable_text_inline, resolve_selectable_text_with_attachments,
@@ -728,6 +729,7 @@ impl TimelineList {
         let hover_msg_id = row.message.id.clone();
         let row_wrapper = if show_header {
             let hover_msg_id_for_anchor = row.message.id.clone();
+            let right_click_msg_id = row.message.id.clone();
             div()
                 .id(SharedString::from(format!(
                     "timeline-row-{}",
@@ -740,6 +742,21 @@ impl TimelineList {
                         this.clear_reaction_hover_tooltip(cx);
                         this.set_hovered_message_with_cursor_anchor(
                             hover_msg_id_for_anchor.clone(),
+                            cursor_x,
+                            cursor_y,
+                            is_thread,
+                            cx,
+                        );
+                        cx.stop_propagation();
+                    }),
+                )
+                .on_mouse_down(
+                    gpui::MouseButton::Right,
+                    cx.listener(move |this, event: &gpui::MouseDownEvent, _, cx| {
+                        let cursor_x: f32 = event.position.x.into();
+                        let cursor_y: f32 = event.position.y.into();
+                        this.show_toolbar_immediately(
+                            right_click_msg_id.clone(),
                             cursor_x,
                             cursor_y,
                             is_thread,
@@ -787,6 +804,7 @@ impl TimelineList {
                 .child(content)
         } else {
             let hover_msg_id_for_anchor = hover_msg_id;
+            let right_click_msg_id = row.message.id.clone();
             div()
                 .id(SharedString::from(format!(
                     "timeline-row-{}",
@@ -799,6 +817,21 @@ impl TimelineList {
                         this.clear_reaction_hover_tooltip(cx);
                         this.set_hovered_message_with_cursor_anchor(
                             hover_msg_id_for_anchor.clone(),
+                            cursor_x,
+                            cursor_y,
+                            is_thread,
+                            cx,
+                        );
+                        cx.stop_propagation();
+                    }),
+                )
+                .on_mouse_down(
+                    gpui::MouseButton::Right,
+                    cx.listener(move |this, event: &gpui::MouseDownEvent, _, cx| {
+                        let cursor_x: f32 = event.position.x.into();
+                        let cursor_y: f32 = event.position.y.into();
+                        this.show_toolbar_immediately(
+                            right_click_msg_id.clone(),
                             cursor_x,
                             cursor_y,
                             is_thread,
@@ -1574,8 +1607,10 @@ impl TimelineList {
                 let any_text_selected = selectable_texts
                     .values()
                     .any(|entity| entity.read(cx).has_selection());
-                let toolbar_visible =
-                    is_hovered && hover_toolbar_settled && !any_text_selected;
+                let toolbar_visible = is_hovered
+                    && hover_toolbar_settled
+                    && !any_text_selected
+                    && toolbar_left.is_some();
                 let toolbar_wrapper = div()
                     .absolute()
                     .when_some(toolbar_left, |d, left| d.left(px(left)))
@@ -2650,6 +2685,7 @@ impl TimelineList {
                     .bg(subtle_surface().opacity(0.6))
                     .text_sm()
                     .font_family(mono_font_family())
+                    .text_size(mono_font_size())
                     .line_height(px(22.))
                     .text_color(rgb(text_primary()))
                     .child(selectable)
@@ -2863,6 +2899,7 @@ impl TimelineList {
                     .py_1()
                     .text_sm()
                     .font_family(mono_font_family())
+                    .text_size(mono_font_size())
                     .child(resolve_selectable_text_inline(
                         selectable_texts,
                         format!("timeline-{message_key}-code-{index}"),
