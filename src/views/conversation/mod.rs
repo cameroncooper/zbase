@@ -768,6 +768,7 @@ fn typing_indicator(label: String, reduced_motion: bool) -> AnyElement {
         .right(px(16.))
         .bottom(px(8.))
         .flex()
+        .justify_end()
         .child(
             div()
                 .min_w(px(0.))

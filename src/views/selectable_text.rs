@@ -17,7 +17,7 @@ use gpui::{
     App, AvailableSpace, Bounds, ClipboardItem, Context, CursorStyle, Element, ElementId, Entity,
     FocusHandle, Focusable, FontStyle, FontWeight, GlobalElementId, Hsla, InteractiveElement,
     IntoElement, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad,
-    Pixels, Point, Resource, StrikethroughStyle, Style, TextRun, UnderlineStyle, Window,
+    Pixels, Point, Resource, StrikethroughStyle, Style, Subscription, TextRun, UnderlineStyle, Window,
     WrappedLine, div, fill, point, prelude::*, px, relative, rgb, rgba, size,
 };
 use std::{collections::HashMap, ops::Range};
@@ -68,6 +68,7 @@ pub struct InlineAttachment {
 
 pub struct SelectableText {
     focus_handle: FocusHandle,
+    blur_subscription: Option<Subscription>,
     debug_label: Option<String>,
     content: String,
     link_ranges: Vec<LinkRange>,
@@ -104,6 +105,7 @@ impl SelectableText {
     pub fn new(focus_handle: FocusHandle, content: impl Into<String>) -> Self {
         Self {
             focus_handle,
+            blur_subscription: None,
             debug_label: None,
             content: content.into(),
             link_ranges: Vec::new(),
@@ -1043,7 +1045,24 @@ impl Element for SelectableTextElement {
 }
 
 impl Render for SelectableText {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.blur_subscription.is_none() {
+            self.blur_subscription = Some(cx.on_blur(
+                &self.focus_handle,
+                window,
+                |this, window, cx| {
+                    // Cached paragraphs outlive their visible selection. A hidden
+                    // selection must not suppress quick reactions in other messages.
+                    if this.has_selection() || this.is_selecting {
+                        this.selected_range = 0..0;
+                        this.selection_reversed = false;
+                        this.is_selecting = false;
+                        cx.notify();
+                        window.refresh();
+                    }
+                },
+            ));
+        }
         div()
             .when(self.fill_width, |container| {
                 container.w_full().min_w(px(0.))
