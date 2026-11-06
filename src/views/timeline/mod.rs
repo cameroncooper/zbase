@@ -1871,6 +1871,8 @@ impl TimelineList {
             ));
         }
         div()
+            .w_full()
+            .min_w(px(0.))
             .flex()
             .flex_col()
             .items_start()
@@ -2950,6 +2952,10 @@ impl TimelineList {
                 }
 
                 div()
+                    // Measure and paint at the same width so wrapped lines stay
+                    // inside the block's background, including the final line.
+                    .w_full()
+                    .min_w(px(0.))
                     .rounded_md()
                     .bg(rgb(panel_alt_bg()))
                     .px_2()
@@ -2957,7 +2963,7 @@ impl TimelineList {
                     .text_sm()
                     .font_family(mono_font_family())
                     .text_size(mono_font_size())
-                    .child(resolve_selectable_text_inline(
+                    .child(resolve_selectable_text(
                         selectable_texts,
                         format!("timeline-{message_key}-code-{index}"),
                         code.clone(),
