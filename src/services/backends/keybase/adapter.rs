@@ -15930,19 +15930,7 @@ fn conversation_title(
         };
     }
 
-    let mut participants = tlf_name
-        .split(',')
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .collect::<Vec<_>>();
-    if let Some(self_user) = self_username {
-        participants.retain(|name| *name != self_user);
-    }
-    if participants.is_empty() {
-        tlf_name.to_string()
-    } else {
-        participants.join(", ")
-    }
+    crate::domain::conversation::dm_peer_title(tlf_name, self_username)
 }
 
 fn conversation_kind(tlf_name: &str, members_type: i64) -> ConversationKind {

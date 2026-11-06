@@ -755,7 +755,7 @@ fn reduce_backend_event(state: &mut UiState, event: BackendEvent) -> ReducerOutp
             }
             state.workspace.workspace_name = payload.workspace_name;
             merge_workspace_conversations(
-                &mut state.workspace,
+                state,
                 payload.channels,
                 payload.direct_messages,
             );
@@ -843,7 +843,7 @@ fn reduce_backend_event(state: &mut UiState, event: BackendEvent) -> ReducerOutp
             if state.workspace.active_workspace_id.is_none() {
                 state.workspace.active_workspace_id = Some(workspace_id.clone());
             }
-            merge_workspace_conversations(&mut state.workspace, channels, direct_messages);
+            merge_workspace_conversations(state, channels, direct_messages);
             for binding in conversation_bindings {
                 state
                     .backend
@@ -872,7 +872,7 @@ fn reduce_backend_event(state: &mut UiState, event: BackendEvent) -> ReducerOutp
                 .workspace
                 .excluded_conversation_ids
                 .extend(conversation_ids);
-            merge_workspace_conversations(&mut state.workspace, Vec::new(), Vec::new());
+            merge_workspace_conversations(state, Vec::new(), Vec::new());
             state.sidebar.sections = build_sidebar_sections(
                 &state.workspace.channels,
                 &state.workspace.direct_messages,
@@ -1665,7 +1665,7 @@ fn reduce_backend_event(state: &mut UiState, event: BackendEvent) -> ReducerOutp
                 conversation_binding,
             );
             merge_workspace_conversations(
-                &mut state.workspace,
+                state,
                 vec![conversation.clone()],
                 Vec::new(),
             );
@@ -2720,10 +2720,18 @@ fn apply_message_reactions(state: &mut UiState, message: &crate::domain::message
 // Merge both buckets together, repairing duplicates left by earlier updates, then
 // partition by the latest summary rather than by the event's input bucket.
 fn merge_workspace_conversations(
-    workspace: &mut super::state::UiWorkspaceState,
+    state: &mut UiState,
     channels: Vec<ConversationSummary>,
     direct_messages: Vec<ConversationSummary>,
 ) {
+    let self_username = state
+        .backend
+        .accounts
+        .values()
+        .find(|account| matches!(account.connection_state, ConnectionState::Connected))
+        .or_else(|| state.backend.accounts.values().next())
+        .map(|account| account.display_name.as_str());
+    let workspace = &mut state.workspace;
     let mut summaries: Vec<ConversationSummary> = Vec::new();
     let mut index_by_id = HashMap::new();
     for mut summary in std::mem::take(&mut workspace.channels)
@@ -2736,6 +2744,12 @@ fn merge_workspace_conversations(
             || workspace.left_conversation_ids.contains(&summary.id)
         {
             continue;
+        }
+        // Cached and notification summaries can still contain the signed-in user.
+        // Normalize once here so labels, search, and avatar projections agree.
+        if summary.kind != ConversationKind::Channel {
+            summary.title =
+                crate::domain::conversation::dm_peer_title(&summary.title, self_username);
         }
         if let Some(index) = index_by_id.get(&summary.id).copied() {
             summary.preserve_known_metadata(&summaries[index]);
@@ -3049,6 +3063,63 @@ fn conversation_id_from_route(route: &Route) -> Option<ConversationId> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn cached_and_refreshed_group_dms_exclude_self_from_shared_title() {
+        use crate::domain::backend::BackendId;
+        use crate::state::{event::BootstrapPayload, state::AccountState};
+        let mut state = UiState::default();
+        let account_id = AccountId::new("keybase");
+        state.backend.accounts.insert(
+            account_id.clone(),
+            AccountState {
+                account_id: account_id.clone(),
+                backend_id: BackendId::new("keybase"),
+                display_name: String::new(),
+                avatar: None,
+                connection_state: ConnectionState::Connected,
+                capabilities: Default::default(),
+            },
+        );
+        let mut summary = channel_summary("bot-group", "alexandermey,butterbot,cameroncooper");
+        summary.kind = ConversationKind::GroupDirectMessage;
+        reduce_backend_event(
+            &mut state,
+            BackendEvent::BootstrapLoaded {
+                source: BootstrapSource::Cache,
+                account_id,
+                payload: BootstrapPayload {
+                    account_display_name: Some("CameronCooper".into()),
+                    direct_messages: vec![summary.clone()],
+                    ..BootstrapPayload::default()
+                },
+            },
+        );
+        assert_eq!(
+            state.workspace.direct_messages[0].title,
+            "alexandermey, butterbot"
+        );
+        let workspace = WorkspaceId::new("ws");
+        // A notification containing all members must not reintroduce self.
+        reduce_backend_event(
+            &mut state,
+            BackendEvent::WorkspaceConversationsExtended {
+                workspace_id: workspace,
+                channels: vec![channel_summary("team", "cameroncooper")],
+                direct_messages: vec![summary],
+                conversation_bindings: vec![],
+            },
+        );
+        assert_eq!(
+            state.workspace.direct_messages[0].title,
+            "alexandermey, butterbot"
+        );
+        assert_eq!(state.workspace.channels[0].title, "cameroncooper");
+        let row = state.sidebar.sections.iter().flat_map(|section| &section.rows)
+            .find(|row| matches!(&row.route, Some(Route::DirectMessage { dm_id, .. }) if dm_id.0 == "bot-group"))
+            .unwrap();
+        assert_eq!(row.label, "alexandermey, butterbot");
+    }
+
     #[test]
     fn pending_json_has_its_final_code_structure_before_server_echo() {
         let id = crate::domain::ids::ConversationId::new("conv");
@@ -3983,7 +4054,7 @@ mod tests {
         );
         // Classification changes also remove the old DM entry.
         merge_workspace_conversations(
-            &mut state.workspace,
+            &mut state,
             vec![channel_summary("same", "general")],
             vec![],
         );

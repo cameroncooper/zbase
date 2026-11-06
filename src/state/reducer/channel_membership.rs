@@ -50,7 +50,7 @@ pub(super) fn channel_left(
     if state.sidebar.retained_unread_conversation.as_ref() == Some(&conversation_id) {
         state.sidebar.retained_unread_conversation = None;
     }
-    merge_workspace_conversations(&mut state.workspace, Vec::new(), Vec::new());
+    merge_workspace_conversations(state, Vec::new(), Vec::new());
     refresh_sidebar(state);
     if state.timeline.conversation_id.as_ref() != Some(&conversation_id) {
         return ReducerOutput::default();
@@ -186,7 +186,7 @@ mod tests {
         assert!(state.sidebar.retained_unread_conversation.is_none());
         assert!(state.timeline.conversation_id.is_none());
         assert!(!state.thread.open);
-        merge_workspace_conversations(&mut state.workspace, vec![summary.clone()], vec![]);
+        merge_workspace_conversations(&mut state, vec![summary.clone()], vec![]);
         assert!(state.workspace.channels.is_empty());
         reduce_backend_event(
             &mut state,
@@ -195,7 +195,7 @@ mod tests {
                 conversation_id: id,
             },
         );
-        merge_workspace_conversations(&mut state.workspace, vec![summary], vec![]);
+        merge_workspace_conversations(&mut state, vec![summary], vec![]);
         assert_eq!(state.workspace.channels.len(), 1);
     }
 
