@@ -343,7 +343,7 @@ impl ThreadPane {
                         },
                         cx,
                     ))
-                    .child(crate::views::composer::composer_hint(&reply_state)),
+                    .children(crate::views::composer::composer_hint(&reply_state)),
             )
             .into_any_element()
     }

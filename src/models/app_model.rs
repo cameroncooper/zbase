@@ -18,7 +18,7 @@ pub enum Connectivity {
 pub struct SendNotice {
     pub banner_title: &'static str,
     pub banner_detail: &'static str,
-    /// Under the focused composer, in place of the Return hint.
+    /// Under the focused composer while offline.
     pub composer_hint: Option<&'static str>,
     /// On the send button, in place of "Send".
     pub send_tooltip: Option<&'static str>,
