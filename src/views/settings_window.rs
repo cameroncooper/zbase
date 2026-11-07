@@ -91,6 +91,18 @@ impl SettingsWindow {
         });
     }
 
+    fn check_for_updates(
+        &mut self,
+        _: &commands::CheckForUpdates,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let _ = self.main_window.update(cx, |_, window, cx| {
+            window.activate_window();
+            window.dispatch_action(Box::new(commands::CheckForUpdates), cx);
+        });
+    }
+
     /// ⌘, while Settings is already frontmost: nothing to open.
     fn reopen(&mut self, _: &commands::OpenPreferences, window: &mut Window, _: &mut Context<Self>) {
         window.activate_window();
@@ -132,6 +144,7 @@ impl Render for SettingsWindow {
                 .on_action(cx.listener(Self::close))
                 .on_action(cx.listener(Self::quit))
                 .on_action(cx.listener(Self::reopen))
+                .on_action(cx.listener(Self::check_for_updates))
                 .child(
                     div()
                         .h(px(TITLE_STRIP_PX))

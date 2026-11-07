@@ -9,17 +9,22 @@ ICON_PATH="${ROOT_DIR}/assets/macos/AppIcon.icns"
 VERSION="$(awk -F'"' '/^version = / { print $2; exit }' "${ROOT_DIR}/Cargo.toml")"
 SKIP_BUILD="${SKIP_BUILD:-0}"
 export MACOSX_DEPLOYMENT_TARGET=15.0
+BUILD_FEATURES=gpui/runtime_shaders
+if [[ "${ZBASE_OFFICIAL_RELEASE:-0}" == 1 ]]; then
+  : "${SPARKLE_DIR:?Run scripts/macos/prepare_sparkle.sh first}" "${SPARKLE_PUBLIC_KEY:?}"
+  BUILD_FEATURES="$BUILD_FEATURES,macos-updater"
+fi
 TARGET_DIR="$(cargo metadata --format-version 1 --no-deps --manifest-path "${ROOT_DIR}/Cargo.toml" | plutil -extract target_directory raw -o - -)"
 
 if [[ "${PROFILE}" == "release" ]]; then
   BIN_PATH="${TARGET_DIR}/release/zbase"
   if [[ "${SKIP_BUILD}" != "1" ]]; then
-    cargo build --release --locked --bin zbase --features gpui/runtime_shaders --timings --manifest-path "${ROOT_DIR}/Cargo.toml"
+    cargo build --release --locked --bin zbase --features "$BUILD_FEATURES" --timings --manifest-path "${ROOT_DIR}/Cargo.toml"
   fi
 else
   BIN_PATH="${TARGET_DIR}/debug/zbase"
   if [[ "${SKIP_BUILD}" != "1" ]]; then
-    cargo build --locked --bin zbase --features gpui/runtime_shaders --timings --manifest-path "${ROOT_DIR}/Cargo.toml"
+    cargo build --locked --bin zbase --features "$BUILD_FEATURES" --timings --manifest-path "${ROOT_DIR}/Cargo.toml"
   fi
 fi
 
@@ -87,3 +92,18 @@ EOF
 plutil -lint "${PLIST_PATH}" >/dev/null
 
 echo "Built app bundle: ${APP_DIR}"
+
+if [[ "${ZBASE_OFFICIAL_RELEASE:-0}" == 1 ]]; then
+  mkdir -p "$CONTENTS_DIR/Frameworks"
+  ditto "$SPARKLE_DIR/Sparkle.framework" "$CONTENTS_DIR/Frameworks/Sparkle.framework"
+  cp "$SPARKLE_DIR/LICENSE" "$RESOURCES_DIR/Licenses/Sparkle.txt"
+  python3 - "$PLIST_PATH" <<'PYCONFIG'
+import base64, os, pathlib, plistlib, sys
+path = pathlib.Path(sys.argv[1])
+key = os.environ["SPARKLE_PUBLIC_KEY"]
+assert len(base64.b64decode(key, validate=True)) == 32, "Invalid Sparkle public key"
+config = plistlib.loads(path.read_bytes())
+config.update(ZBaseDistribution="official", SUFeedURL="https://raw.githubusercontent.com/cameroncooper/zbase/updates/appcast.xml", SUPublicEDKey=key, SUEnableAutomaticChecks=True, SUAutomaticallyUpdate=False, SUSendProfileInfo=False, SUScheduledCheckInterval=21600, SUVerifyUpdateBeforeExtraction=True)
+path.write_bytes(plistlib.dumps(config))
+PYCONFIG
+fi

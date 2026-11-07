@@ -26,6 +26,10 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: '0'
       CARGO_PROFILE_TEST_DEBUG: '0'
       DEPS_DIR: ${{ github.workspace }}/dist/macos-deps
+      SPARKLE_DIR: ${{ github.workspace }}/dist/sparkle
+      SPARKLE_PUBLIC_KEY: ${{ vars.SPARKLE_PUBLIC_KEY }}
+      ZBASE_OFFICIAL_RELEASE: '1'
+      DYLD_FRAMEWORK_PATH: ${{ github.workspace }}/dist/sparkle
     steps:
       - uses: actions/checkout@v7
       - name: Validate release version and platform
@@ -46,6 +50,12 @@ jobs:
             fi
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Validate updater configuration
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          : "${SPARKLE_PUBLIC_KEY:?Set the SPARKLE_PUBLIC_KEY Actions variable}"
+          : "${SPARKLE_PRIVATE_KEY:?Set the SPARKLE_PRIVATE_KEY Actions secret}"
       - name: Install build tools
         id: toolchain
         run: |
@@ -83,11 +93,13 @@ jobs:
           key: rust-macos15-arm64-${{ steps.toolchain.outputs.rust-key }}-${{ hashFiles('Cargo.lock', 'scripts/macos/build_media_deps.sh') }}-${{ github.sha }}
           restore-keys: |
             rust-macos15-arm64-${{ steps.toolchain.outputs.rust-key }}-${{ hashFiles('Cargo.lock', 'scripts/macos/build_media_deps.sh') }}-
+      - name: Prepare pinned updater framework
+        run: scripts/macos/prepare_sparkle.sh
       - name: Packaging integration tests
-        run: python3 -m unittest discover -s scripts/macos -p test_bundle_dylibs.py -v
+        run: python3 -m unittest discover -s scripts/macos -p 'test_*.py' -v
       - name: Rust release tests
         id: rust-tests
-        run: cargo test --release --locked --all-targets --features gpui/runtime_shaders --timings
+        run: cargo test --release --locked --all-targets --features gpui/runtime_shaders,macos-updater --timings
       - name: Build and verify self-contained app
         run: |
           scripts/macos/build_app_bundle.sh release
@@ -115,6 +127,10 @@ jobs:
           APPLE_API_ISSUER_ID: ${{ vars.APPLE_API_ISSUER_ID }}
           VERSION: ${{ steps.version.outputs.version }}
         run: scripts/macos/package_release.sh dist/macos/zBase.app "dist/release/zBase-${VERSION}-macos-arm64.dmg"
+      - name: Sign update archive
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: scripts/macos/sign_update.sh "dist/release/zBase-${{ steps.version.outputs.version }}-macos-arm64.dmg" "${{ steps.version.outputs.version }}"
       - name: Include corresponding media sources and build information
         run: |
           cp "$DEPS_DIR"/downloads/*.tar.* dist/release/
@@ -154,10 +170,68 @@ jobs:
           gh api "repos/$GH_REPO/releases/tags/$TAG" > release-state.json
           jq -e --argjson id "$RELEASE_ID" \
             '.id == $id and .draft == false and .immutable != true' release-state.json
+          python3 scripts/publish_update_feed.py --release release-state.json --metadata dist/release/update.json --repository "$GH_REPO" --verify-existing-archive
           tar -czf dist/release/media-build-info.tar.gz -C dist/release media-build-info
           gh release upload "$TAG" dist/release/*.dmg dist/release/*.sha256 dist/release/*.tar.* --clobber
+
+  update-homebrew:
+    needs: [build, attach]
+    if: github.event_name == 'release' && github.event.release.prerelease == false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Update Homebrew source formula
-        if: github.event.release.prerelease == false
         env:
           GH_TOKEN: ${{ secrets.TAP_TOKEN }}
         run: python3 scripts/update_homebrew.py "v${VERSION}"
+
+  publish-update-feed:
+    needs: [build, attach]
+    if: github.event_name == 'release' && github.event.release.prerelease == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Read the branch after acquiring this lock; never overwrite a newer feed.
+    concurrency:
+      group: zbase-stable-update-feed
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_ID: ${{ github.event.release.id }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: macos-release
+          path: dist/release
+      - name: Publish verified stable feed last
+        run: |
+          gh api "repos/$GH_REPO/releases/$RELEASE_ID" > "$RUNNER_TEMP/release.json"
+          gh auth setup-git
+          feed="$RUNNER_TEMP/zbase-update-feed"
+          git init --initial-branch=updates "$feed"
+          git -C "$feed" remote add origin "https://github.com/$GH_REPO.git"
+          git -C "$feed" ls-remote --heads origin refs/heads/updates > "$RUNNER_TEMP/feed-ref"
+          if [[ -s "$RUNNER_TEMP/feed-ref" ]]; then
+            git -C "$feed" fetch --depth=1 origin updates
+            git -C "$feed" checkout -B updates FETCH_HEAD
+          fi
+          python3 scripts/publish_update_feed.py --release "$RUNNER_TEMP/release.json" \
+            --metadata dist/release/update.json --destination "$feed" --repository "$GH_REPO"
+          git -C "$feed" config user.name 'github-actions[bot]'
+          git -C "$feed" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git -C "$feed" add appcast.xml notes/
+          if ! git -C "$feed" diff --cached --quiet; then
+            git -C "$feed" commit -m 'Publish verified zBase update'
+            git -C "$feed" push origin HEAD:updates
+          fi

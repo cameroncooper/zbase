@@ -12,6 +12,7 @@ icon = ["assets/macos/AppIcon.icns"]
 [features]
 default = []
 demo-fixtures = []
+macos-updater = []
 
 [dependencies]
 gpui = { version = "0.2.2", default-features = false, features = ["font-kit"] }

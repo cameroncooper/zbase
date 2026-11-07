@@ -18,13 +18,12 @@ def system(path):
 
 
 def dependencies(path):
-    # otool includes a dylib's own install name as its first entry.
-    lines = output("otool", "-L", path).splitlines()[1:]
-    deps = [line.strip().split(" (compatibility version", 1)[0] for line in lines]
-    if path.suffix == ".dylib":
-        install_id = output("otool", "-D", path).splitlines()[1:]
-        deps = [dep for dep in deps if dep not in install_id]
-    return deps
+    # Universal framework binaries have a header for each architecture. Only
+    # indented lines are dependencies; omit LC_ID_DYLIB even without a .dylib suffix.
+    lines = output("otool", "-L", path).splitlines()
+    deps = [line.strip().split(" (compatibility version", 1)[0] for line in lines if line.startswith("\t")]
+    install_ids = output("otool", "-D", path).splitlines()[1:]
+    return list(dict.fromkeys(dep for dep in deps if dep not in install_ids))
 
 
 def rpaths(path):
@@ -60,6 +59,18 @@ def verify(app, arch):
             assert dep.startswith("@loader_path/"), f"Nonportable dependency: {binary}: {dep}"
             resolved = resolve(dep, binary, executable)
             assert resolved.is_relative_to(app), f"Dependency escapes app: {dep}"
+    sparkle = app / "Contents/Frameworks/Sparkle.framework"
+    if sparkle.exists():
+        for binary in sparkle.rglob("*"):
+            if binary.is_symlink() or not binary.is_file() or "Mach-O" not in output("file", "-b", binary):
+                continue
+            assert arch in output("lipo", "-archs", binary).split(), f"Missing {arch} slice: {binary}"
+            minimums = re.findall(r"\bminos\s+(\S+)", output("vtool", "-show-build", binary))
+            assert minimums and all(tuple(map(int, v.split("."))) <= (15, 0) for v in minimums), f"Unsupported Sparkle minimum OS: {binary}"
+            for dep in dependencies(binary):
+                if not system(dep):
+                    resolved = resolve(dep, binary, executable)
+                    assert resolved.is_relative_to(sparkle.resolve()), f"Sparkle dependency escapes framework: {dep}"
     print(f"Verified {len(binaries)} self-contained {arch} binaries for macOS 15")
 
 
@@ -73,6 +84,11 @@ def bundle(app, prefix):
         rewrites = []
         for dep in dependencies(source):
             if system(dep):
+                continue
+            if source == executable and dep.startswith("@rpath/Sparkle.framework/"):
+                embedded = frameworks / dep.removeprefix("@rpath/")
+                assert embedded.is_file() and embedded.resolve().is_relative_to(frameworks.resolve()), "Missing embedded Sparkle framework"
+                rewrites.extend(["-change", dep, "@loader_path/../Frameworks/" + dep.removeprefix("@rpath/")])
                 continue
             resolved = resolve(dep, source, executable)
             assert resolved.is_relative_to(prefix), f"Dependency outside release prefix: {resolved}"

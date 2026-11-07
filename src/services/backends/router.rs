@@ -9,7 +9,7 @@ use crate::{
         bindings::{ConversationBinding, MessageBinding, WorkspaceBinding},
         effect::{BackendCommand, Effect, SearchScope},
         event::BackendEvent,
-        ids::QueryId,
+        ids::{ClientMessageId, OpId, QueryId},
         state::TimelineKey,
     },
 };
@@ -18,6 +18,7 @@ use super::traits::{BackendError, ChatBackend, RoutedBackendCommand};
 
 #[derive(Default)]
 pub struct BackendRouter {
+    inflight_sends: HashMap<ClientMessageId, OpId>,
     backends: HashMap<BackendId, Box<dyn ChatBackend>>,
     accounts: HashMap<AccountId, BackendId>,
     workspace_bindings: HashMap<WorkspaceId, WorkspaceBinding>,
@@ -57,7 +58,23 @@ impl BackendRouter {
                 continue;
             };
             match self.route_command(command.clone()) {
-                Ok(successes) => events.extend(successes),
+                Ok(successes) => {
+                    if let BackendCommand::SendMessage {
+                        client_message_id,
+                        op_id,
+                        ..
+                    }
+                    | BackendCommand::SendAttachment {
+                        client_message_id,
+                        op_id,
+                        ..
+                    } = command
+                    {
+                        self.inflight_sends
+                            .insert(client_message_id.clone(), op_id.clone());
+                    }
+                    events.extend(successes);
+                }
                 Err(error) => {
                     // Searches have UI-specific completion handlers outside the store.
                     if let BackendCommand::Search { query_id, .. } = command {
@@ -74,7 +91,39 @@ impl BackendRouter {
                 }
             }
         }
+        self.finish_send_events(&events);
         events
+    }
+
+    pub fn has_inflight_sends(&self) -> bool {
+        !self.inflight_sends.is_empty()
+    }
+
+    fn finish_send_events(&mut self, events: &[BackendEvent]) {
+        for event in events {
+            match event {
+                BackendEvent::MessageSendConfirmed {
+                    client_message_id, ..
+                }
+                | BackendEvent::MessageSendFailed {
+                    client_message_id, ..
+                } => {
+                    self.inflight_sends.remove(client_message_id);
+                }
+                BackendEvent::CommandFailed { command, .. } => {
+                    if let BackendCommand::SendMessage {
+                        client_message_id, ..
+                    }
+                    | BackendCommand::SendAttachment {
+                        client_message_id, ..
+                    } = command.as_ref()
+                    {
+                        self.inflight_sends.remove(client_message_id);
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 
     pub fn poll_backends(&mut self) -> Vec<BackendEvent> {
@@ -82,6 +131,7 @@ impl BackendRouter {
         for backend in self.backends.values_mut() {
             events.extend(backend.poll_events());
         }
+        self.finish_send_events(&events);
         events
     }
 
@@ -740,6 +790,31 @@ impl BackendRouter {
 mod tests {
     use super::*;
     use crate::domain::backend::BackendCapabilities;
+
+    #[test]
+    fn pending_send_tracking_survives_navigation_and_clears_only_the_completed_operation() {
+        let mut router = BackendRouter::default();
+        let first = ClientMessageId::new("first");
+        let second = ClientMessageId::new("second");
+        router
+            .inflight_sends
+            .insert(first.clone(), OpId::new("op-first"));
+        router
+            .inflight_sends
+            .insert(second.clone(), OpId::new("op-second"));
+        router.finish_send_events(&[BackendEvent::MessageSendFailed {
+            op_id: OpId::new("op-first"),
+            client_message_id: first,
+            error: "offline".into(),
+        }]);
+        assert!(router.has_inflight_sends());
+        router.finish_send_events(&[BackendEvent::MessageSendFailed {
+            op_id: OpId::new("op-second"),
+            client_message_id: second,
+            error: "offline".into(),
+        }]);
+        assert!(!router.has_inflight_sends());
+    }
 
     struct ConnectedBackend;
     impl ChatBackend for ConnectedBackend {

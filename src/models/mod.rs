@@ -1108,6 +1108,27 @@ impl AppModels {
         }
     }
 
+    /// Restart only when text drafts can be restored without losing other work.
+    pub fn update_restart_blocker(&self) -> Option<&'static str> {
+        if self.call.active_call.as_ref().is_some_and(|call| call.status != crate::domain::call::CallStatus::Idle) {
+            return Some("End the active call before restarting.");
+        }
+        if !matches!(self.composer.mode, ComposerMode::Compose)
+            || self.composer_drafts.iter().any(|(id, draft)| id != &self.composer.conversation_id && !matches!(draft.mode, ComposerMode::Compose)) {
+            return Some("Finish or cancel message edits and inline replies before restarting.");
+        }
+        if self.timeline.rows.iter().any(|row| matches!(row, crate::models::timeline_model::TimelineRow::Message(row) if row.message.send_state == crate::domain::message::MessageSendState::Pending))
+            || !self.timeline.upload_progress.is_empty() {
+            return Some("Wait for messages and uploads to finish before restarting.");
+        }
+        if !self.composer.attachments.is_empty() || !self.thread_pane.reply_attachments.is_empty()
+            || self.composer_drafts.iter().any(|(id, draft)| id != &self.composer.conversation_id && !draft.attachments.is_empty())
+            || self.thread_reply_drafts.iter().any(|(id, draft)| Some(id) != self.thread_pane.root_message_id.as_ref() && !draft.attachments.is_empty()) {
+            return Some("Send or remove draft attachments, including in other conversations, before restarting.");
+        }
+        None
+    }
+
     /// Unsent composer text, by conversation.
     pub fn composer_draft_texts(&self) -> impl Iterator<Item = (&ConversationId, &str)> {
         self.composer_drafts
@@ -1116,7 +1137,6 @@ impl AppModels {
     }
 
     /// Leaves `text` as the unsent draft of a conversation other than the open one.
-    #[cfg(any(test, feature = "demo-fixtures"))]
     pub fn seed_composer_draft(&mut self, conversation_id: ConversationId, text: &str) {
         self.composer_drafts.insert(
             conversation_id,
@@ -2891,6 +2911,18 @@ mod tests {
             last_activity_ms: 0,
             last_message: None,
         }
+    }
+
+    #[test]
+    fn updater_preserves_text_drafts_but_blocks_losing_edit_context() {
+        let mut models = AppModels::empty_with_settings(SettingsModel::default());
+        models.update_composer_draft_text("unsent text".into());
+        assert!(models.update_restart_blocker().is_none());
+        models.composer.mode = ComposerMode::Edit { message_id: MessageId::new("edited") };
+        models.store_current_composer_draft();
+        assert!(models.update_restart_blocker().unwrap().contains("edits"));
+        models.composer.mode = ComposerMode::Compose;
+        assert!(models.update_restart_blocker().is_none(), "live state takes precedence over a cached edit snapshot");
     }
 
     #[test]

@@ -28,3 +28,5 @@ pub struct AppServices {
     pub draft_store: DraftStore,
     pub settings_store: SettingsStore,
 }
+
+pub mod updates;

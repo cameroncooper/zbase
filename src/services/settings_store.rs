@@ -11,13 +11,25 @@ pub struct SettingsStore;
 impl SettingsStore {
     pub fn load_from_disk() -> io::Result<SettingsModel> {
         let path = Self::path();
-        let raw = match fs::read_to_string(&path) {
-            Ok(raw) => raw,
-            Err(err) if err.kind() == ErrorKind::NotFound => return Ok(SettingsModel::default()),
-            Err(err) => return Err(err),
-        };
-
-        Ok(parse_settings(&raw))
+        match fs::read_to_string(&path) {
+            Ok(raw) => Ok(parse_settings(&raw)),
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                // One-time migration from source builds' working-directory storage.
+                let legacy = std::env::current_dir()
+                    .unwrap_or_default()
+                    .join(".zbase/settings.conf");
+                let isolated = std::env::var_os("ZBASE_DATA_DIR").is_some();
+                if !isolated && let Ok(raw) = fs::read_to_string(legacy) {
+                    let settings = parse_settings(&raw);
+                    if let Err(error) = Self::save_to_disk(&settings) {
+                        tracing::warn!("could not migrate settings: {error}");
+                    }
+                    return Ok(settings);
+                }
+                Ok(SettingsModel::default())
+            }
+            Err(error) => Err(error),
+        }
     }
 
     pub fn save_to_disk(settings: &SettingsModel) -> io::Result<()> {
@@ -29,20 +41,7 @@ impl SettingsStore {
     }
 
     fn path() -> PathBuf {
-        // Demo runs must neither read nor overwrite the user's real settings.
-        #[cfg(any(test, feature = "demo-fixtures"))]
-        if std::env::var("ZBASE_BENCH_USE_DEMO").is_ok_and(|raw| {
-            matches!(
-                raw.trim().to_ascii_lowercase().as_str(),
-                "1" | "true" | "yes" | "on"
-            )
-        }) {
-            return super::local_store::paths::data_root().join("settings.conf");
-        }
-        std::env::current_dir()
-            .unwrap_or_else(|_| PathBuf::from("."))
-            .join(".zbase")
-            .join("settings.conf")
+        super::local_store::paths::data_root().join("settings.conf")
     }
 }
 

@@ -383,6 +383,7 @@ fn app_menus() -> Vec<Menu> {
         Menu {
             name: "zBase".into(),
             items: vec![
+                MenuItem::action("Check for Updates…", commands::CheckForUpdates),
                 MenuItem::action("Settings…", commands::OpenPreferences),
                 MenuItem::separator(),
                 MenuItem::os_submenu("Services", SystemMenuType::Services),

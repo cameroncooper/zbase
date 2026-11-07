@@ -48,6 +48,8 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: '0'
       CARGO_PROFILE_TEST_DEBUG: '0'
       DEPS_DIR: ${{ github.workspace }}/dist/macos-deps
+      SPARKLE_DIR: ${{ github.workspace }}/dist/sparkle
+      DYLD_FRAMEWORK_PATH: ${{ github.workspace }}/dist/sparkle
     steps:
       - uses: actions/checkout@v7
         with:
@@ -90,13 +92,17 @@ jobs:
           key: ci-rust-macos15-arm64-${{ steps.toolchain.outputs.rust-key }}-${{ hashFiles('Cargo.lock', 'scripts/macos/build_media_deps.sh') }}-${{ github.sha }}
           restore-keys: |
             ci-rust-macos15-arm64-${{ steps.toolchain.outputs.rust-key }}-${{ hashFiles('Cargo.lock', 'scripts/macos/build_media_deps.sh') }}-
+      - name: Updater bridge checks
+        run: |
+          scripts/macos/prepare_sparkle.sh
+          scripts/macos/test_updater_bridge.sh
       - name: Clippy
         id: clippy
-        run: cargo clippy --locked --all-targets --features gpui/runtime_shaders --timings
+        run: cargo clippy --locked --all-targets --features gpui/runtime_shaders,macos-updater --timings
       - name: Rust tests
-        run: cargo test --locked --all-targets --features gpui/runtime_shaders --timings
+        run: cargo test --locked --all-targets --features gpui/runtime_shaders,macos-updater --timings
       - name: Packaging integration tests
-        run: python3 -m unittest discover -s scripts/macos -p test_bundle_dylibs.py -v
+        run: python3 -m unittest discover -s scripts/macos -p 'test_*.py' -v
       - name: Build and verify self-contained app
         if: github.event_name != 'pull_request'
         run: |

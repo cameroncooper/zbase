@@ -8,6 +8,7 @@ actions!(
         ShowHome,
         ShowActivity,
         OpenPreferences,
+        CheckForUpdates,
         SortSidebarByRecent,
         GroupSidebarByTeam,
         ToggleThreadPane,

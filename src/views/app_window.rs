@@ -1,3 +1,5 @@
+mod update_notes;
+mod updates;
 use crate::models::conversation_model::AvatarParticipant;
 use super::pane_window::PaneWindowSizing;
 use crate::services::og_service::{OgFetchResult, OgService};
@@ -224,6 +226,7 @@ struct ClosingPane {
 }
 
 pub struct AppWindow {
+    update_ui: updates::UpdateUi,
     models: AppModels,
     pane_window_sizing: PaneWindowSizing,
     /// The sidebar's width changed (Previews are wider); on the next frame the
@@ -389,6 +392,7 @@ struct SyncCache {
 
 #[derive(Clone, Debug, PartialEq)]
 struct SidebarViewState {
+    update_available: bool,
     sidebar: SidebarModel,
     connectivity: Connectivity,
     current_user_display_name: String,
@@ -532,6 +536,7 @@ impl CachedSidebarView {
 impl Render for CachedSidebarView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let chrome = SidebarChrome {
+            update_available: self.state.update_available,
             can_go_back: self.state.can_go_back,
             can_go_forward: self.state.can_go_forward,
             search_open: matches!(self.state.current_route, Route::Search { .. }),
@@ -558,6 +563,15 @@ impl Render for CachedSidebarView {
 }
 
 impl SidebarHost for CachedSidebarView {
+    fn sidebar_show_updates(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let owner = self.owner.clone();
+        window.defer(cx, move |_, cx| {
+            let _ = owner.update(cx, |this, cx| {
+                this.update_ui.open = true;
+                cx.notify();
+            });
+        });
+    }
     fn sidebar_set_mode(&mut self, mode: SidebarMode, cx: &mut Context<Self>) {
         let owner = self.owner.clone();
         cx.defer(move |cx| {
@@ -710,6 +724,10 @@ impl SidebarHost for CachedSidebarView {
 }
 
 impl SidebarHost for AppWindow {
+    fn sidebar_show_updates(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        self.update_ui.open = true;
+        cx.notify();
+    }
     fn sidebar_set_mode(&mut self, mode: SidebarMode, cx: &mut Context<Self>) {
         self.set_sidebar_mode(mode, cx);
     }
@@ -826,6 +844,7 @@ impl AppWindow {
         let (og_result_sender, og_result_receiver) = mpsc::channel();
 
         Self {
+            update_ui: updates::UpdateUi::new(),
             models,
             pane_window_sizing: PaneWindowSizing::default(),
             sidebar_fit_pending: true,
@@ -958,6 +977,7 @@ impl AppWindow {
             false
         });
         self.subscriptions = vec![
+            cx.on_app_quit(|this, cx| { this.save_update_session_on_quit(cx); std::future::ready(()) }),
             cx.observe_window_bounds(window, |_, _, cx| cx.notify()),
             cx.on_app_quit(|this, _| {
                 let flush = this.window_preferences_writer.flush();
@@ -1245,6 +1265,7 @@ impl AppWindow {
         ];
 
         if !self.bench_skip_backend {
+            crate::services::updates::start();
             self.start_backend_poll_loop(cx);
         } else {
             tracing::warn!("bench.backend.skip enabled");
@@ -1363,6 +1384,7 @@ impl AppWindow {
     fn drain_backend_events(&mut self, cx: &mut Context<Self>) {
         let drain_t0 = Instant::now();
         self.sync_drafts_from_inputs(cx);
+        self.poll_updates(cx);
         let polled_events = self.backend_router.poll_backends();
         self.perf_harness.record_backend_poll(polled_events.len());
         if !polled_events.is_empty() {
@@ -1402,6 +1424,7 @@ impl AppWindow {
         let defer_model_sync = quick_switcher_typing || self.text_input_activity_recent();
         let mut deferred_events_applied = false;
         for event in events {
+            self.confirm_update_resume_account(&event);
             if let BackendEvent::BenchmarkPulse(sent_at) = &event {
                 self.perf_harness
                     .record_duration(PerfTimer::BackendDeliveryDelay, sent_at.elapsed());
@@ -3009,6 +3032,7 @@ impl AppWindow {
 
     fn sidebar_view_state(&self) -> SidebarViewState {
         SidebarViewState {
+            update_available: self.update_ui.snapshot.has_reminder(),
             sidebar: self.models.sidebar.clone(),
             connectivity: self.models.app.connectivity.clone(),
             current_user_display_name: self.models.app.current_user_display_name.clone(),
@@ -4451,9 +4475,11 @@ impl AppWindow {
         else {
             return;
         };
+        let offset = self.update_ui.reading_anchor.take().filter(|(id, _)| id == &target_message_id)
+            .map(|(_, offset)| offset).filter(|offset| offset.is_finite()).unwrap_or(0.).max(0.);
         self.timeline_list_state.scroll_to(ListOffset {
             item_ix: row_index,
-            offset_in_item: px(0.),
+            offset_in_item: px(offset),
         });
         self.models.timeline.pending_scroll_target = None;
     }
@@ -4962,6 +4988,7 @@ impl AppWindow {
     }
 
     fn register_bindings_from_backend_event(&mut self, event: &BackendEvent) {
+        self.confirm_update_resume_account(event);
         match event {
             BackendEvent::BootstrapLoaded { payload, .. } => {
                 for binding in &payload.workspace_bindings {
@@ -8223,6 +8250,8 @@ impl AppWindow {
     }
 
     pub(crate) fn dismiss_overlays(&mut self, cx: &mut Context<Self>) {
+        self.update_ui.open = false;
+        self.update_ui.previous_focus = None;
         if self.models.overlay.new_chat_open || self.models.new_chat.open {
             self.dispatch_ui_action(UiAction::CloseNewChat);
         }
@@ -8859,6 +8888,7 @@ impl AppWindow {
         let app = &self.models.app;
         crate::views::preferences::PreferencesContext {
             sidebar_mode: self.models.sidebar.mode,
+            updates: self.update_ui.snapshot.clone(),
             account: app.current_user_id.as_ref().map(|user_id| {
                 crate::views::preferences::AccountSummary {
                     display_name: if app.current_user_display_name.trim().is_empty() {
@@ -9295,6 +9325,10 @@ impl AppWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.update_ui.open {
+            self.close_update_panel(window, cx, true);
+            return;
+        }
         if let Some(target) = self.autocomplete_target_for_focused_input(window, cx) {
             let dismissed_signature = self.current_autocomplete_dismiss_signature(target, cx);
             if self.clear_autocomplete_for_target(target, cx) {
@@ -9358,6 +9392,8 @@ impl AppWindow {
 impl Render for AppWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let render_t0 = Instant::now();
+        self.restore_update_session(window, cx);
+        self.remember_update_focus(window, cx);
         self.fit_window_to_sidebar(window, cx);
         self.sync_pane_window_size(window, cx);
         self.remember_window_preferences(window);
@@ -9504,6 +9540,7 @@ impl Render for AppWindow {
                 .on_action(cx.listener(Self::open_quick_switcher_recent_5_action))
                 .on_action(cx.listener(Self::show_activity_action))
                 .on_action(cx.listener(Self::open_preferences_action))
+                .on_action(cx.listener(Self::check_for_updates_action))
                 .on_action(cx.listener(Self::sort_sidebar_by_recent_action))
                 .on_action(cx.listener(Self::group_sidebar_by_team_action))
                 .on_action(cx.listener(Self::toggle_thread_pane_action))
@@ -9588,6 +9625,7 @@ impl Render for AppWindow {
                                 &self.sidebar_scroll_handle,
                                 &self.sidebar_recent_scroll,
                                 SidebarChrome {
+                                    update_available: self.update_ui.snapshot.has_reminder(),
                                     can_go_back: !self.models.navigation.back_stack.is_empty(),
                                     can_go_forward: !self
                                         .models
@@ -9755,6 +9793,7 @@ impl Render for AppWindow {
                     self.models.overlay.reaction_hover_tooltip.as_ref(),
                     |div, tooltip| div.child(render_reaction_hover_tooltip(tooltip, window)),
                 )
+                .when(self.update_ui.open, |div| div.child(self.render_update_panel(cx)))
                 .when(self.keybase_inspector.open, |div| {
                     div.child(self.render_keybase_inspector_modal(cx))
                 })

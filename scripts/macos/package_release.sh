@@ -33,6 +33,23 @@ notarize() {
     return 1
   fi
 }
+# Sparkle contains nested executables, XPC services, and an updater app. Sign
+# inside out, preserving upstream entitlements, before signing the outer app.
+python3 - "$APP" <<'PYSIGN'
+import os, pathlib, subprocess, sys
+framework = pathlib.Path(sys.argv[1]) / "Contents/Frameworks/Sparkle.framework"
+if framework.exists():
+    binaries, bundles = [], []
+    for path in framework.rglob("*"):
+        if path.is_symlink():
+            continue
+        if path.is_dir() and path.suffix in (".app", ".xpc"):
+            bundles.append(path)
+        elif path.is_file() and "Mach-O" in subprocess.check_output(["file", "-b", str(path)], text=True):
+            binaries.append(path)
+    for path in binaries + sorted(bundles, key=lambda p: len(p.parts), reverse=True) + [framework]:
+        subprocess.run(["codesign", "--force", "--options", "runtime", "--timestamp", "--preserve-metadata=identifier,entitlements", "--keychain", os.environ["SIGNING_KEYCHAIN"], "--sign", os.environ["MACOS_SIGNING_IDENTITY"], str(path)], check=True)
+PYSIGN
 for library in "${APP}"/Contents/Frameworks/*.dylib; do sign "${library}"; done
 sign "${APP}"
 codesign --verify --deep --strict --verbose=2 "${APP}"

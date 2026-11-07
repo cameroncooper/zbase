@@ -32,6 +32,7 @@ pub struct PreferencesView;
 #[derive(Clone, Debug, Default)]
 pub struct PreferencesContext {
     pub sidebar_mode: SidebarMode,
+    pub updates: crate::services::updates::UpdateSnapshot,
     pub account: Option<AccountSummary>,
 }
 
@@ -195,6 +196,10 @@ impl PreferencesView {
                         vec![order_row, sidebar_row, side_panel_row],
                     ))
                     .child(section("Accessibility", vec![motion_row]))
+                    .child(section(
+                        "Updates",
+                        update_settings_rows(&context.updates, app),
+                    ))
                     .child(
                         div()
                             .px(px(4.))
@@ -613,4 +618,78 @@ fn raised_shadow() -> Vec<BoxShadow> {
         blur_radius: px(2.),
         spread_radius: px(0.),
     }]
+}
+
+fn update_settings_rows(
+    snapshot: &crate::services::updates::UpdateSnapshot,
+    app: &WeakEntity<AppWindow>,
+) -> Vec<AnyElement> {
+    use crate::services::updates::UpdateAction;
+    let mut rows = vec![setting_row(
+        "Software updates",
+        "Check for the latest version of zBase.",
+        div()
+            .id("settings-check-updates")
+            .cursor_pointer()
+            .text_color(rgb(accent()))
+            .child("Check now")
+            .on_click(move |_, window, cx| {
+                window.dispatch_action(Box::new(crate::app::commands::CheckForUpdates), cx)
+            })
+            .into_any_element(),
+    )];
+    if snapshot.state != "disabled" {
+        for (id, title, description, checked, action) in [
+            (
+                "settings-update-checks",
+                "Automatically check",
+                "Look for stable updates in the background.",
+                snapshot.automatic_checks,
+                UpdateAction::ToggleChecks,
+            ),
+            (
+                "settings-update-downloads",
+                "Download in background",
+                "Install on quit, or restart when ready.",
+                snapshot.automatic_downloads,
+                UpdateAction::ToggleDownloads,
+            ),
+        ] {
+            rows.push(setting_row(
+                title,
+                description,
+                toggle(id, checked, app, move |this, cx| {
+                    this.update_command(action, cx)
+                }),
+            ));
+        }
+        let last = chrono::DateTime::from_timestamp(snapshot.last_check as i64, 0)
+            .filter(|_| snapshot.last_check > 0.)
+            .map(|date| {
+                date.with_timezone(&chrono::Local)
+                    .format("%b %-d at %-I:%M %p")
+                    .to_string()
+            })
+            .unwrap_or_else(|| "Not checked yet".into());
+        rows.push(
+            div()
+                .px_4()
+                .py_2()
+                .text_xs()
+                .text_color(rgb(text_secondary()))
+                .child(format!("Last checked: {last}"))
+                .into_any_element(),
+        );
+    } else {
+        rows.push(
+            div()
+                .px_4()
+                .py_2()
+                .text_xs()
+                .text_color(rgb(text_secondary()))
+                .child(snapshot.message.clone())
+                .into_any_element(),
+        );
+    }
+    rows
 }

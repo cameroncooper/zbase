@@ -324,6 +324,7 @@ enum ToolbarAction {
     Forward,
     Search,
     NewChat,
+    Updates,
 }
 
 /// What the toolbar above the list reflects about the window: whether history
@@ -331,6 +332,7 @@ enum ToolbarAction {
 /// which sidebar menu is open.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SidebarChrome {
+    pub update_available: bool,
     pub can_go_back: bool,
     pub can_go_forward: bool,
     pub search_open: bool,
@@ -397,6 +399,7 @@ impl ToolbarButton {
                         ToolbarAction::Forward => this.sidebar_navigate_history(true, window, cx),
                         ToolbarAction::Search => this.sidebar_toggle_quick_switcher(cx),
                         ToolbarAction::NewChat => this.sidebar_open_new_chat(window, cx),
+                        ToolbarAction::Updates => this.sidebar_show_updates(window, cx),
                     }
                 }))
             })
@@ -415,6 +418,7 @@ impl ToolbarButton {
 pub struct Sidebar;
 
 pub trait SidebarHost: Sized + 'static {
+    fn sidebar_show_updates(&mut self, window: &mut Window, cx: &mut Context<Self>);
     fn sidebar_set_mode(&mut self, mode: SidebarMode, cx: &mut Context<Self>);
     fn sidebar_toggle_quick_switcher(&mut self, cx: &mut Context<Self>);
     fn sidebar_open_new_chat(&mut self, window: &mut Window, cx: &mut Context<Self>);
@@ -576,7 +580,7 @@ impl Sidebar {
         chrome: SidebarChrome,
         cx: &mut Context<H>,
     ) -> AnyElement {
-        let compact = width_px < 208.;
+        let compact = width_px < if chrome.update_available { 260. } else { 208. };
         let button_size = if compact { 24. } else { TOOLBAR_BUTTON_PX };
         let history = [
             ToolbarButton {
@@ -618,6 +622,18 @@ impl Sidebar {
                 enabled: true,
             },
         ];
+        let mut tools = tools.into_iter().collect::<Vec<_>>();
+        if chrome.update_available {
+            tools.push(ToolbarButton {
+                id: "sidebar-update",
+                tooltip: "Software update available".into(),
+                shortcut: None,
+                icon: "assets/icons/arrow-down-circle.svg",
+                action: ToolbarAction::Updates,
+                on: true,
+                enabled: true,
+            });
+        }
         let group = |buttons: Vec<AnyElement>| {
             div()
                 .flex()
