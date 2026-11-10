@@ -1,19 +1,19 @@
 use crate::domain::{affinity::Affinity, ids::UserId, presence::Presence};
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize)]
 pub enum SocialGraphListType {
     #[default]
     Followers,
     Following,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum SocialListLoadState {
     Loading,
     Failed,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum ProofState {
     Verified,
     Broken,
@@ -21,7 +21,7 @@ pub enum ProofState {
     Unknown,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct IdentityProof {
     pub service_name: String,
     pub service_username: String,
@@ -31,7 +31,7 @@ pub struct IdentityProof {
     pub state: ProofState,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct SocialGraphEntry {
     pub user_id: UserId,
     pub display_name: String,
@@ -39,7 +39,7 @@ pub struct SocialGraphEntry {
     pub affinity: Affinity,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct SocialGraph {
     pub followers_count: Option<u32>,
     pub following_count: Option<u32>,
@@ -49,7 +49,7 @@ pub struct SocialGraph {
     pub following: Option<Vec<SocialGraphEntry>>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct TeamShowcaseEntry {
     pub name: String,
     pub description: String,
@@ -57,13 +57,13 @@ pub struct TeamShowcaseEntry {
     pub members_count: u32,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct CustomField {
     pub label: String,
     pub value: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum ProfileSection {
     IdentityProofs(Vec<IdentityProof>),
     SocialGraph(SocialGraph),
@@ -71,7 +71,7 @@ pub enum ProfileSection {
     CustomFields(Vec<CustomField>),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct UserProfile {
     pub user_id: UserId,
     pub username: String,

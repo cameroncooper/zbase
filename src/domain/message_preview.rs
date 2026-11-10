@@ -6,7 +6,7 @@ use crate::domain::{
     message::{ChatEvent, MessageFragment, MessageRecord},
 };
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct MessagePreview {
     /// Server id, or the `local:` id of a message still being sent.
     pub message_id: Option<MessageId>,
@@ -16,7 +16,7 @@ pub struct MessagePreview {
     pub body: PreviewBody,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum PreviewBody {
     /// Message source text: Markdown and `:shortcode:` emoji, not yet cleaned.
     Text(String),

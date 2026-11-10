@@ -9,7 +9,7 @@ use crate::{
 };
 use std::collections::HashMap;
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct SidebarPreview {
     /// Leads the text: "You: ", "Lena: ", or "Lena " before an action.
     pub prefix: Option<String>,
@@ -21,7 +21,7 @@ pub struct SidebarPreview {
 
 /// What a conversation's preview line shows instead of its newest message,
 /// because it is happening now or needs you.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum PreviewLive {
     /// "Lena is typing…"
     Typing(String),

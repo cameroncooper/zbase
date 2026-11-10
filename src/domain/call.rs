@@ -3,7 +3,7 @@ use crate::domain::{
     user::UserSummary,
 };
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum CallStatus {
     Idle,
     Ringing,
@@ -14,13 +14,13 @@ pub enum CallStatus {
     Reconnecting,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct ParticipantSummary {
     pub user_id: UserId,
     pub muted: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct CallSessionSummary {
     pub call_id: CallId,
     pub status: CallStatus,

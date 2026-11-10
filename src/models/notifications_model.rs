@@ -1,6 +1,6 @@
 use crate::domain::{ids::MessageId, route::Route};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub enum ToastAction {
     OpenPreferences,
     FocusComposer,
@@ -23,13 +23,13 @@ impl ToastAction {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct ToastNotification {
     pub title: String,
     pub action: Option<ToastAction>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub enum ActivityKind {
     Mention,
     ThreadReply,
@@ -37,7 +37,7 @@ pub enum ActivityKind {
     Reminder,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct ActivityItem {
     pub kind: ActivityKind,
     pub title: String,
@@ -47,7 +47,7 @@ pub struct ActivityItem {
     pub unread: bool,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct NotificationsModel {
     pub toasts: Vec<ToastNotification>,
     pub notification_center_count: u32,

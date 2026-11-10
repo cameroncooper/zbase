@@ -5,7 +5,7 @@ use crate::domain::{
     ids::{ConversationId, MessageId, UserId},
 };
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct LinkPreview {
     pub url: String,
     pub video_url: Option<String>,
@@ -21,13 +21,13 @@ pub struct LinkPreview {
     pub github_pr: Option<GithubPrPreview>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub enum BroadcastKind {
     Here,
     All,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize)]
 pub struct EmojiSourceRef {
     pub backend_id: BackendId,
     pub ref_key: String,
@@ -39,7 +39,7 @@ impl EmojiSourceRef {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub enum MessageFragment {
     Text(String),
     InlineCode(String),
@@ -63,7 +63,7 @@ pub enum MessageFragment {
     Quote(String),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub enum ChatEvent {
     MemberJoined,
     MemberLeft,
@@ -100,27 +100,27 @@ pub enum ChatEvent {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum MessageSendState {
     Sent,
     Pending,
     Failed,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct MessageReaction {
     pub emoji: String,
     pub source_ref: Option<EmojiSourceRef>,
     pub actor_ids: Vec<UserId>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct EditMeta {
     pub edit_id: MessageId,
     pub edited_at_ms: Option<i64>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct MessageRecord {
     pub id: MessageId,
     pub conversation_id: ConversationId,

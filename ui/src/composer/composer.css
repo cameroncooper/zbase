@@ -1,0 +1,538 @@
+/* The composer (views/composer/mod.rs), its autocomplete list, format menu,
+   join bar and the file upload lightbox (views/overlays). */
+
+/* `ComposerPanel`: px_4 pt_2, with the typing slot as its bottom inset. */
+.zc-panel {
+  position: relative;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 8px 16px 0;
+}
+
+/* The thread pane's composer: px_4 pt_2 pb(COMPOSER_BOTTOM_INSET_PX). */
+.zc-thread-panel {
+  position: relative;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 8px 16px 16px;
+}
+
+.zc-panel.zc-join,
+.zc-thread-panel.zc-join {
+  padding: 0;
+}
+
+.zc-mode-banner {
+  margin-bottom: 8px;
+  padding-left: 8px;
+  border-left: 2px solid var(--accent);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+/* `composer_field`: 8px radius, 40px tall at one line, tools at the bottom right. */
+.zc-field {
+  width: 100%;
+  min-height: 40px;
+  border-radius: 8px;
+  border: 1px solid var(--field-border);
+  background: var(--main-bg);
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--text-primary);
+  display: flex;
+  align-items: flex-end;
+  cursor: text;
+}
+
+:root[data-theme="dark"] .zc-field {
+  background: var(--field-bg);
+}
+
+.zc-editor {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 4px 8px 12px;
+  display: flex;
+}
+
+.zc-editor textarea {
+  flex: 1;
+  min-width: 0;
+  display: block;
+  height: 22px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  outline: none;
+  resize: none;
+  overflow-y: hidden;
+  background: transparent;
+  font: inherit;
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--text-primary);
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+}
+
+.zc-editor textarea::placeholder {
+  color: color-mix(in srgb, var(--text-primary) 70%, transparent);
+  opacity: 1;
+}
+
+.zc-tools {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 5px 5px 0;
+  cursor: default;
+}
+
+.zc-tool,
+.zc-send {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.zc-tool {
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.zc-tool:hover,
+.zc-tool-active {
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+}
+
+.zc-format-wrapper {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.zc-format-label {
+  font-size: 13px;
+  line-height: 16px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.zc-send-enabled {
+  background: var(--accent-strong);
+  color: #ffffff;
+  cursor: pointer;
+}
+
+.zc-send-enabled:hover {
+  background: var(--accent);
+}
+
+.zc-send-disabled {
+  color: var(--text-secondary);
+}
+
+.zc-send-disabled svg {
+  opacity: 0.45;
+}
+
+/* The row under the conversation field that says who is typing. */
+.zc-typing-slot {
+  height: 18px;
+  padding-left: 13px;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.zc-typing {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.zc-typing-dots {
+  flex-shrink: 0;
+  display: flex;
+  gap: 3px;
+}
+
+.zc-typing-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+  opacity: 0.35;
+  animation: zc-typing-dot 1200ms linear infinite;
+}
+
+[data-reduced-motion] .zc-typing-dot {
+  animation: none;
+  opacity: 0.7;
+}
+
+/* `typing_dot_opacity`: 0.35 + 0.65 * sin over the first 40% of the cycle. */
+@keyframes zc-typing-dot {
+  0% { opacity: 0.35; }
+  10% { opacity: 0.81; }
+  20% { opacity: 1; }
+  30% { opacity: 0.81; }
+  40% { opacity: 0.35; }
+  100% { opacity: 0.35; }
+}
+
+.zc-typing-label {
+  min-width: 0;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* `render_inline_autocomplete_overlay`: 16px in from the pane, above the field. */
+.zc-autocomplete-anchor {
+  position: absolute;
+  left: 16px;
+  z-index: 20;
+}
+
+.zc-autocomplete {
+  width: 100%;
+  max-height: 220px;
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  background: var(--panel-bg);
+  box-shadow:
+    0 10px 24px rgba(43, 52, 64, 0.05),
+    0 2px 8px rgba(43, 52, 64, 0.02);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+:root[data-theme="dark"] .zc-autocomplete {
+  border-color: rgba(255, 255, 255, 0.2);
+  box-shadow:
+    0 10px 24px rgba(0, 0, 0, 0.2),
+    0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.zc-candidate {
+  width: 100%;
+  flex-shrink: 0;
+  padding: 4px 8px;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.zc-candidate:hover {
+  background: color-mix(in srgb, var(--accent-soft) 65%, transparent);
+}
+
+.zc-candidate-selected,
+.zc-candidate-selected:hover {
+  background: color-mix(in srgb, var(--accent-soft) 85%, transparent);
+}
+
+:root[data-theme="dark"] .zc-candidate:hover {
+  background: color-mix(in srgb, var(--accent-soft) 32%, transparent);
+}
+
+:root[data-theme="dark"] .zc-candidate-selected,
+:root[data-theme="dark"] .zc-candidate-selected:hover {
+  background: color-mix(in srgb, var(--accent-soft) 45%, transparent);
+}
+
+.zc-candidate-split {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.zc-candidate-emoji {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.zc-candidate-primary {
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--text-primary);
+}
+
+.zc-candidate-secondary {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-secondary);
+}
+
+.zc-candidate-glyph {
+  font-size: 16px;
+  line-height: 24px;
+  color: var(--text-primary);
+}
+
+/* views/popup_menu.rs, anchored by its bottom-left 6px above the button. */
+.zc-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  z-index: 30;
+  min-width: 180px;
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+  border-radius: 8px;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.16);
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: default;
+}
+
+:root[data-theme="dark"] .zc-menu {
+  background: #2c2c2c;
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+
+.zc-menu-item {
+  height: 24px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.zc-menu-item:hover {
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+}
+
+.zc-menu-label {
+  flex: 1;
+}
+
+.zc-menu-shortcut {
+  padding-left: 24px;
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+
+/* views/conversation `render_join_bar`. */
+.zc-join-bar {
+  padding: 8px 12px;
+  border-top: 1px solid rgba(0, 0, 0, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+:root[data-theme="dark"] .zc-join-bar {
+  border-top-color: rgba(255, 255, 255, 0.1);
+}
+
+.zc-join-text {
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--text-secondary);
+}
+
+.zc-join-button {
+  padding: 4px 12px;
+  border-radius: 6px;
+  background: var(--accent);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+  color: #ffffff;
+  cursor: pointer;
+}
+
+.zc-join-button:hover {
+  background: var(--accent-soft);
+}
+
+/* The upload lightbox, over a dimmed window like the other modal overlays. */
+.zc-lightbox-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+:root[data-theme="dark"] .zc-lightbox-backdrop {
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.zc-lightbox {
+  width: 520px;
+  max-height: 620px;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  background: var(--panel-bg);
+  box-shadow:
+    0 10px 24px rgba(43, 52, 64, 0.05),
+    0 2px 8px rgba(43, 52, 64, 0.02);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: var(--text-primary);
+}
+
+:root[data-theme="dark"] .zc-lightbox {
+  border-color: rgba(255, 255, 255, 0.2);
+  box-shadow:
+    0 10px 24px rgba(0, 0, 0, 0.2),
+    0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.zc-lightbox-empty {
+  width: 420px;
+  padding: 12px 16px;
+  font-size: 14px;
+}
+
+.zc-lightbox-header {
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.zc-lightbox-body {
+  padding: 12px 16px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.zc-lightbox-preview {
+  height: 280px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  background: var(--panel-bg);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+}
+
+.zc-lightbox-note {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.zc-lightbox-filename {
+  font-size: 14px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+.zc-lightbox-meta {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.zc-lightbox-caption {
+  border-radius: 6px;
+  background: var(--panel-bg);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  padding: 8px 12px;
+  cursor: text;
+}
+
+.zc-lightbox-caption textarea {
+  display: block;
+  width: 100%;
+  height: 40px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  outline: none;
+  resize: none;
+  background: transparent;
+  font: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--text-primary);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.zc-lightbox-caption textarea::placeholder {
+  color: color-mix(in srgb, var(--text-primary) 70%, transparent);
+  opacity: 1;
+}
+
+:root[data-theme="dark"] .zc-lightbox-header,
+:root[data-theme="dark"] .zc-lightbox-footer,
+:root[data-theme="dark"] .zc-lightbox-preview,
+:root[data-theme="dark"] .zc-lightbox-caption {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+/* panel_surface(): panel_bg at 55% in dark. */
+:root[data-theme="dark"] .zc-lightbox-preview,
+:root[data-theme="dark"] .zc-lightbox-caption {
+  background: color-mix(in srgb, var(--panel-bg) 55%, transparent);
+}
+
+.zc-lightbox-footer {
+  padding: 12px 16px;
+  border-top: 1px solid rgba(0, 0, 0, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* views/mod.rs `badge`. */
+.zc-badge {
+  padding: 4px 10px;
+  border-radius: 9999px;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.zc-badge-plain {
+  background: var(--panel-alt-bg);
+  color: var(--text-primary);
+}
+
+.zc-badge-accent {
+  background: var(--accent);
+  color: var(--panel-alt-bg);
+}

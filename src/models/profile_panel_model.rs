@@ -3,7 +3,7 @@ use crate::domain::{
     profile::{SocialGraphListType, SocialListLoadState, UserProfile},
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize)]
 pub enum SocialTab {
     #[default]
     Followers,
@@ -19,7 +19,7 @@ impl SocialTab {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct ProfilePanelModel {
     pub user_id: Option<UserId>,
     pub profile: Option<UserProfile>,

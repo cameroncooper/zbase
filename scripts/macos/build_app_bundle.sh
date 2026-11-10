@@ -9,12 +9,19 @@ ICON_PATH="${ROOT_DIR}/assets/macos/AppIcon.icns"
 VERSION="$(awk -F'"' '/^version = / { print $2; exit }' "${ROOT_DIR}/Cargo.toml")"
 SKIP_BUILD="${SKIP_BUILD:-0}"
 export MACOSX_DEPLOYMENT_TARGET=15.0
-BUILD_FEATURES=gpui/runtime_shaders
+# The app serves the built web view (ui/dist) from the binary.
+BUILD_FEATURES=custom-protocol
 if [[ "${ZBASE_OFFICIAL_RELEASE:-0}" == 1 ]]; then
   : "${SPARKLE_DIR:?Run scripts/macos/prepare_sparkle.sh first}" "${SPARKLE_PUBLIC_KEY:?}"
   BUILD_FEATURES="$BUILD_FEATURES,macos-updater"
 fi
 TARGET_DIR="$(cargo metadata --format-version 1 --no-deps --manifest-path "${ROOT_DIR}/Cargo.toml" | plutil -extract target_directory raw -o - -)"
+
+if [[ "${SKIP_BUILD}" != "1" ]]; then
+  # The binary embeds ui/dist at compile time, so the web view is built first.
+  [[ -d "${ROOT_DIR}/node_modules" ]] || npm ci --prefix "${ROOT_DIR}" --no-audit --no-fund
+  npm run --prefix "${ROOT_DIR}" build
+fi
 
 if [[ "${PROFILE}" == "release" ]]; then
   BIN_PATH="${TARGET_DIR}/release/zbase"

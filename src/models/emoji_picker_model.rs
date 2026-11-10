@@ -13,9 +13,9 @@ pub const SKIN_TONE_OPTIONS: [SkinTone; 6] = [
     SkinTone::Dark,
 ];
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub enum EmojiPickerItem {
-    Stock(&'static Emoji),
+    Stock(#[serde(serialize_with = "serialize_stock_emoji")] &'static Emoji),
     Custom {
         alias: String,
         unicode: Option<String>,
@@ -23,14 +23,40 @@ pub enum EmojiPickerItem {
     },
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct EmojiPickerModel {
     pub query: String,
+    #[serde(serialize_with = "serialize_debug")]
     pub selected_skin_tone: Option<SkinTone>,
+    #[serde(serialize_with = "serialize_debug")]
     pub active_group: Option<emojis::Group>,
     pub hovered: Option<EmojiPickerItem>,
     pub recent_aliases: Vec<String>,
     pub skin_tone_expanded: bool,
+}
+
+/// Stock emoji travel as the glyph and the alias the backend accepts.
+fn serialize_stock_emoji<S: serde::Serializer>(
+    emoji: &&'static Emoji,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    use serde::ser::SerializeStruct;
+    let mut item = serializer.serialize_struct("StockEmoji", 3)?;
+    item.serialize_field("emoji", emoji.as_str())?;
+    item.serialize_field("name", emoji.name())?;
+    item.serialize_field("shortcode", &emoji.shortcode())?;
+    item.end()
+}
+
+/// The emoji crate's enums have no serde support; their variant names suffice.
+fn serialize_debug<T: std::fmt::Debug, S: serde::Serializer>(
+    value: &Option<T>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    match value {
+        Some(value) => serializer.serialize_some(&format!("{value:?}")),
+        None => serializer.serialize_none(),
+    }
 }
 
 impl EmojiPickerItem {

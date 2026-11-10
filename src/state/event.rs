@@ -75,7 +75,7 @@ pub struct MessageReactionsForMessage {
     pub reactions: Vec<MessageReactionEntry>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize)]
 pub enum TeamRoleKind {
     Member,
     Admin,

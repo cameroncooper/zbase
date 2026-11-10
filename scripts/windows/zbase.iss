@@ -37,10 +37,32 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "{#StageDir}\zbase.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#StageDir}\*.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#StageDir}\licenses\*"; DestDir: "{app}\licenses"; Flags: ignoreversion recursesubdirs
+Source: "{#StageDir}\MicrosoftEdgeWebview2Setup.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall; Check: NeedsWebView2
 
 [Icons]
 Name: "{autoprograms}\zBase"; Filename: "{app}\zbase.exe"
 Name: "{autodesktop}\zBase"; Filename: "{app}\zbase.exe"; Tasks: desktopicon
 
 [Run]
+; zBase renders in WebView2, which Windows 11 includes and Windows 10 may not.
+Filename: "{tmp}\MicrosoftEdgeWebview2Setup.exe"; Parameters: "/silent /install"; StatusMsg: "Installing Microsoft Edge WebView2 Runtime..."; Check: NeedsWebView2; Flags: waituntilterminated
 Filename: "{app}\zbase.exe"; Description: "{cm:LaunchProgram,zBase}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+const
+  WebView2Key = 'Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
+
+function HasWebView2(Root: Integer; Key: String): Boolean;
+var
+  Version: String;
+begin
+  Result := RegQueryStringValue(Root, Key, 'pv', Version) and (Version <> '') and (Version <> '0.0.0.0');
+end;
+
+{ Microsoft's documented detection: a per-machine or per-user runtime version. }
+function NeedsWebView2: Boolean;
+begin
+  Result := not (HasWebView2(HKLM, 'SOFTWARE\WOW6432Node\' + WebView2Key)
+    or HasWebView2(HKLM, 'SOFTWARE\' + WebView2Key)
+    or HasWebView2(HKCU, 'Software\' + WebView2Key));
+end;

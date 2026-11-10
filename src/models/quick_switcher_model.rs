@@ -3,7 +3,7 @@ use crate::domain::{
     route::Route,
 };
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum QuickSwitcherResultKind {
     UnreadChannel,
     Channel,
@@ -11,7 +11,7 @@ pub enum QuickSwitcherResultKind {
     Message,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct QuickSwitcherResult {
     pub label: String,
     pub sublabel: Option<String>,
@@ -25,7 +25,7 @@ pub struct QuickSwitcherResult {
     pub timestamp_ms: Option<i64>,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct QuickSwitcherModel {
     pub query: String,
     pub results: Vec<QuickSwitcherResult>,

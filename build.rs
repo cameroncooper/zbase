@@ -1,10 +1,10 @@
 use std::{env, path::PathBuf, process::Command};
 
 fn main() {
+    // Window config, capabilities and, on Windows, the icon and manifest resources.
+    tauri_build::build();
     println!("cargo:rerun-if-changed=native/updater.m");
     println!("cargo:rerun-if-env-changed=SPARKLE_DIR");
-    #[cfg(windows)]
-    windows_resources();
     if env::var_os("CARGO_FEATURE_MACOS_UPDATER").is_none()
         || env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("macos")
     {
@@ -54,23 +54,4 @@ fn main() {
     println!("cargo:rustc-link-lib=framework=Sparkle");
     println!("cargo:rustc-link-lib=framework=AppKit");
     println!("cargo:rustc-link-arg=-Wl,-rpath,@executable_path/../Frameworks");
-}
-
-#[cfg(windows)]
-fn windows_resources() {
-    if env::var("CARGO_CFG_TARGET_ENV").as_deref() != Ok("msvc") {
-        return;
-    }
-    // GPUI calls TaskDialogIndirect, which only Common Controls v6 provides.
-    println!("cargo:rustc-link-arg-bin=zbase=/MANIFEST:EMBED");
-    println!(
-        "cargo:rustc-link-arg-bin=zbase=/MANIFESTDEPENDENCY:type='win32' \
-         name='Microsoft.Windows.Common-Controls' version='6.0.0.0' \
-         processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'"
-    );
-    println!("cargo:rerun-if-changed=assets/windows/zbase.rc");
-    println!("cargo:rerun-if-changed=assets/windows/zBase.ico");
-    embed_resource::compile_for("assets/windows/zbase.rc", ["zbase"], embed_resource::NONE)
-        .manifest_required()
-        .unwrap();
 }

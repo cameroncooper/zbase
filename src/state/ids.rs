@@ -1,6 +1,6 @@
 macro_rules! runtime_id_type {
     ($name:ident, $default:literal) => {
-        #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+        #[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize)]
         pub struct $name(pub String);
 
         impl $name {

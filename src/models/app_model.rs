@@ -1,6 +1,6 @@
 use crate::domain::ids::{UserId, WorkspaceId};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum Connectivity {
     Online,
     Reconnecting,
@@ -14,7 +14,7 @@ pub enum Connectivity {
 /// Keybase service, the message is marked "Not sent" and keeps a Retry. The
 /// listener reconnects on its own with backoff, so there is nothing for the
 /// user to press; the copy says so instead of offering a "Try again".
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct SendNotice {
     pub banner_title: &'static str,
     pub banner_detail: &'static str,
@@ -41,7 +41,7 @@ impl Connectivity {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct AppModel {
     pub open_workspaces: Vec<WorkspaceId>,
     pub active_workspace_id: WorkspaceId,

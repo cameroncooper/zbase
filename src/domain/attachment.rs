@@ -1,6 +1,6 @@
 use std::path::Path;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum AttachmentKind {
     Image,
     Video,
@@ -8,20 +8,20 @@ pub enum AttachmentKind {
     File,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum AttachmentSource {
     Url(String),
     LocalPath(String),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct AttachmentPreview {
     pub source: AttachmentSource,
     pub width: Option<u32>,
     pub height: Option<u32>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct AttachmentSummary {
     pub name: String,
     pub kind: AttachmentKind,

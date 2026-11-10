@@ -50,6 +50,10 @@ jobs:
             exit 1
           }
           "version=$version" >> $env:GITHUB_OUTPUT
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
       - name: Install build tools
         id: toolchain
         run: |

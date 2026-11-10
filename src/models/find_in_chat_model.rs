@@ -1,6 +1,6 @@
 use crate::domain::{ids::ConversationId, search::SearchResult};
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct FindInChatModel {
     pub open: bool,
     pub query: String,

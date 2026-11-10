@@ -1,6 +1,6 @@
 use crate::domain::call::CallSessionSummary;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct CallModel {
     pub active_call: Option<CallSessionSummary>,
     pub is_muted: bool,

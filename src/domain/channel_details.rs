@@ -5,14 +5,14 @@ use crate::domain::{
     pins::PinnedItem,
 };
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum NotificationLevel {
     All,
     MentionsOnly,
     Nothing,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct ChannelMemberPreview {
     pub user_id: UserId,
     pub display_name: String,
@@ -25,7 +25,7 @@ pub struct ChannelMemberPreview {
     pub availability: Option<crate::domain::presence::Availability>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct ChannelDetails {
     pub conversation_id: ConversationId,
     pub title: String,

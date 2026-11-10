@@ -1,6 +1,6 @@
 use crate::domain::ids::{CallId, ChannelId, DmId, WorkspaceId};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum Route {
     WorkspaceHome {
         workspace_id: WorkspaceId,

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use crate::domain::attachment::AttachmentKind;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct FileUploadCandidate {
     pub path: PathBuf,
     pub filename: String,
@@ -13,13 +13,13 @@ pub struct FileUploadCandidate {
     pub caption: String,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum UploadTarget {
     Composer,
     Thread,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct FileUploadLightboxModel {
     pub candidates: Vec<FileUploadCandidate>,
     pub current_index: usize,

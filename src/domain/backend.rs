@@ -1,4 +1,4 @@
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize)]
 pub struct BackendId(pub String);
 
 impl BackendId {
@@ -13,7 +13,7 @@ impl Default for BackendId {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize)]
 pub struct AccountId(pub String);
 
 impl AccountId {
@@ -28,7 +28,7 @@ impl Default for AccountId {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize)]
 pub struct ProviderWorkspaceRef(pub String);
 
 impl ProviderWorkspaceRef {
@@ -37,7 +37,7 @@ impl ProviderWorkspaceRef {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize)]
 pub struct ProviderConversationRef(pub String);
 
 impl ProviderConversationRef {
@@ -46,7 +46,7 @@ impl ProviderConversationRef {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize)]
 pub struct ProviderMessageRef(pub String);
 
 impl ProviderMessageRef {
@@ -55,7 +55,7 @@ impl ProviderMessageRef {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, serde::Serialize)]
 pub struct BackendCapabilities {
     pub supports_threads: bool,
     pub supports_message_edit: bool,

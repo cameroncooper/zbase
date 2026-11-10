@@ -1,4 +1,4 @@
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub enum SidebarMode {
     #[default]
     Recent,
@@ -7,21 +7,21 @@ pub enum SidebarMode {
 
 /// How much a sidebar row shows: one line with the name, or two with the
 /// newest message under it.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub enum SidebarStyle {
     #[default]
     Compact,
     Previews,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum ThemeMode {
     Light,
     Dark,
     System,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum Density {
     Comfortable,
     Compact,
@@ -29,7 +29,7 @@ pub enum Density {
 
 use std::collections::{HashMap, HashSet};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct SettingsModel {
     pub theme_mode: ThemeMode,
     pub density: Density,

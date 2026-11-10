@@ -1,6 +1,6 @@
 use crate::domain::search::{SearchFilter, SearchResult};
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct SearchModel {
     pub query: String,
     pub filters: Vec<SearchFilter>,

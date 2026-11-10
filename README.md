@@ -5,14 +5,14 @@
 <h1 align="center">zBase</h1>
 
 <p align="center">
-A fast, native desktop chat client for <a href="https://keybase.io">Keybase</a>, built with Rust and <a href="https://gpui.rs">GPUI</a>.
+A fast desktop chat client for <a href="https://keybase.io">Keybase</a>, built with Rust and <a href="https://tauri.app">Tauri</a>.
 </p>
 
 <p align="center">
   <img src="docs/screenshot.png" alt="zBase screenshot" />
 </p>
 
-zBase is a from-scratch replacement for the official Keybase desktop app. It talks directly to the Keybase daemon over its local msgpack-RPC socket and renders everything through GPUI — the same GPU-accelerated UI framework that powers the [Zed](https://zed.dev) editor. zBase keeps a local message cache for quick navigation and search, with light and dark themes that follow Keybase’s colors.
+zBase is a from-scratch replacement for the official Keybase desktop app. It talks directly to the Keybase daemon over its local msgpack-RPC socket from a Rust core, and renders its interface in the system web view through [Tauri](https://tauri.app) (WebKit on macOS, WebView2 on Windows). zBase keeps a local message cache for quick navigation and search, with light and dark themes that follow Keybase’s colors.
 
 ## Install
 
@@ -27,7 +27,7 @@ zBase uses the local Keybase service and your existing Keybase account. Keep the
 ### Windows
 
 1. Make sure you have **64-bit Windows 10 (1903) or Windows 11** and [Keybase](https://keybase.io/download) installed and logged in.
-2. Download `zBase-<version>-windows-x64-setup.exe` from the [latest GitHub release](https://github.com/cameroncooper/zbase/releases/latest) and run it. No administrator rights are needed.
+2. Download `zBase-<version>-windows-x64-setup.exe` from the [latest GitHub release](https://github.com/cameroncooper/zbase/releases/latest) and run it. No administrator rights are needed. If the Microsoft Edge WebView2 Runtime is missing (some Windows 10 installs), the installer adds it.
 3. The installer is not code-signed yet, so Windows may show "Windows protected your PC": choose **More info → Run anyway**.
 
 Launch zBase from the Start Menu. To uninstall, use **Settings → Apps → Installed apps → zBase**. zBase does not play sounds or show desktop notifications; keep the Keybase app running in the tray if you want them. See [Windows releases](docs/windows-releases.md) for how the installer is built.
@@ -93,8 +93,6 @@ ln -s "$(brew --prefix)/opt/zbase/zBase.app" /Applications/zBase.app
 - Persistent settings stored in `.zbase/settings.conf`
 
 ### Performance
-- Built-in benchmark harness (`Cmd+Shift+B`) with per-component timers (render, sidebar, main panel, composer, reducer, backend events)
-- CSV export and configurable scenarios via environment variables
 - RocksDB local cache for offline-ready conversation and message history
 - Tantivy full-text search index with automatic schema migration
 - Metadata-only history catch-up and local search indexing avoid downloading every historical attachment
@@ -114,11 +112,7 @@ View › Sort by Recent / Group by Team switches the sidebar order. Opening a pr
 | Variable | Description |
 |---|---|
 | `ZBASE_LOG_LEVEL` | Logging verbosity: `trace`, `debug`, `info`, `warn`, `error` |
-| `ZBASE_BENCH_AUTOSTART` | Start the performance benchmark automatically on launch |
-| `ZBASE_BENCH_DURATION_SECS` | Benchmark capture duration |
-| `ZBASE_BENCH_SCENARIO` | Benchmark scenario name |
-| `ZBASE_BENCH_LABEL` | Label for the benchmark run |
-| `ZBASE_BENCH_OUTPUT` | Path for benchmark CSV output |
+| `ZBASE_DATA_DIR` | Use another data directory (cache, search index, settings), e.g. to run a second copy |
 
 ### Keyboard shortcuts
 
@@ -149,28 +143,37 @@ View › Sort by Recent / Group by Team switches the sidebar order. Opening a pr
 
 ```
 src/
-├── app/          # Bootstrap, window management, theme, key bindings
 ├── domain/       # Core types: messages, conversations, users, profiles
-├── models/       # View models (sidebar, timeline, composer, search, settings, …)
 ├── state/        # Unidirectional store: actions → reducer → state → effects
+├── models/       # View models (sidebar, timeline, composer, search, settings, …)
+│                 # and `store_sync`, which projects the store into them
 ├── services/     # Backend adapters, RocksDB cache, Tantivy search, sync, uploads
 │   └── backends/
 │       └── keybase/  # Keybase RPC client and adapter
-├── util/         # Fuzzy matching, video decoder, deep links, debounce, perf harness
-├── views/        # GPUI components (sidebar, timeline, composer, overlays, profile, …)
-└── main.rs
+├── engine/       # The app controller: owns store, backends and models on one
+│                 # thread, handles intents from the UI and publishes model sections
+│                 # (shell, timeline, composer, right_pane, overlays)
+├── util/         # Fuzzy matching, deep links, search snippets, debounce
+└── main.rs       # Tauri entry point
+ui/src/           # The interface (React + TypeScript): one folder per engine area,
+                  # plus core/ (engine bridge, shortcuts, palette) and ui/ (primitives)
 ```
+
+The engine publishes each view model as a `model:<section>` event whenever it changes; the web view renders them and sends user actions back as typed intents over a single Tauri command. Rendering-heavy work that needs Rust (inline markdown, emoji resolution, tree-sitter highlighting) happens in the engine.
 
 The backend layer is trait-based (`ChatBackend`), making it possible to add adapters for other chat providers in the future.
 
 ## Building from source
 
-Source builds require macOS 15+, Xcode Command Line Tools, stable Rust with 2024 edition support, and the following Homebrew dependencies:
+Source builds require macOS 15+, Xcode Command Line Tools, stable Rust with 2024 edition support, Node.js 22+, and the following Homebrew dependencies:
 
 ```sh
 xcode-select --install
-brew install cmake pkgconf ffmpeg
+brew install cmake pkgconf ffmpeg@8 node
+export PKG_CONFIG_PATH="$(brew --prefix ffmpeg@8)/lib/pkgconfig"
 ```
+
+`ffmpeg-next` 8 does not build against FFmpeg 9, so point `pkg-config` at FFmpeg 8 as above.
 
 With Rust installed, clone the repository and build the app:
 
@@ -181,29 +184,35 @@ scripts/macos/build_app_bundle.sh release
 open dist/macos/zBase.app
 ```
 
-This creates a development app at `dist/macos/zBase.app` using your installed media libraries. For terminal-based development:
+This creates a development app at `dist/macos/zBase.app` using your installed media libraries; the script builds the web view into `ui/dist` and embeds it. For development with hot reload of the interface:
 
 ```sh
-cargo run --locked --release --features gpui/runtime_shaders
+npm ci
+npx tauri dev
 ```
+
+`tauri dev` starts the Vite server on port 1420 and runs the Rust app against it, rebuilding when Rust files change. Set `ZBASE_DATA_DIR` to a scratch directory to run it next to an installed zBase, whose cache is locked while it runs.
 
 To publish a release, run **Actions → Release** on `main` with the next version. It bumps the package version, pushes the tag, generates release notes, and builds and attaches both installers. Leave the version blank for a build-only test. For signing, configuration and retries, see [macOS releases](docs/macos-releases.md) and [Windows releases](docs/windows-releases.md).
 
 ### Checks before opening a PR
 
 ```sh
+npm ci
+npx tsc --noEmit
+npm run build   # release features embed ui/dist
 cargo fmt --all -- --check
-cargo clippy --locked --all-targets --features gpui/runtime_shaders -- -D warnings
+cargo clippy --locked --all-targets --features custom-protocol -- -D warnings
 scripts/macos/prepare_sparkle.sh
-SPARKLE_DIR="$PWD/dist/sparkle" cargo clippy --locked --all-targets --all-features --features gpui/runtime_shaders -- -D warnings
-cargo test --locked --all-targets --features gpui/runtime_shaders
+SPARKLE_DIR="$PWD/dist/sparkle" cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo test --locked --all-targets
 python3 -m unittest discover -s scripts -p 'test_*.py' -v
 python3 -m unittest discover -s scripts/macos -p test_bundle_dylibs.py -v
 ```
 
-Compiler and Clippy warnings are denied for this package through `Cargo.toml`, including local builds and release tests. CI checks Clippy with both default features and all app features (including demo fixtures); the existing view APIs and inline enums have item-scoped Clippy exceptions with reasons. Cargo still reports upstream future-compatibility notices for GPUI’s transitive `block` and `proc-macro-error2` dependencies.
+Compiler and Clippy warnings are denied for this package through `Cargo.toml`, including local builds and release tests. CI checks Clippy with the release features and with all app features (including demo fixtures), and typechecks and builds the web view.
 
-GitHub Actions runs Rust formatting, workflow/script linting, Clippy, Rust tests, and macOS packaging fixture tests on PRs and pushes to `main`. PRs skip app bundle creation, archiving, and upload. Pushes to `main` and manual CI runs additionally build a debug app using the dependencies compiled for checks and tests, then verify its minimum OS, architecture, bundled library dependencies, and ad-hoc signatures. The `macos-development-app` artifact from those runs contains an unoptimized development build for inspection; it is not Developer ID signed or notarized. The `macos-cargo-timings` artifact contains Cargo's build timing reports, including on PRs.
+GitHub Actions runs Rust formatting, the web view typecheck and build, workflow/script linting, Clippy, Rust tests, and macOS packaging fixture tests on PRs and pushes to `main`. PRs skip app bundle creation, archiving, and upload. Pushes to `main` and manual CI runs additionally build a debug app using the dependencies compiled for checks and tests, then verify its minimum OS, architecture, bundled library dependencies, and ad-hoc signatures. The `macos-development-app` artifact from those runs contains an unoptimized development build for inspection; it is not Developer ID signed or notarized. The `macos-cargo-timings` artifact contains Cargo's build timing reports, including on PRs.
 
 Media dependencies are cached as soon as their build succeeds. Rust build outputs are saved even if later validation fails, with compiler-specific cache keys. The separate Release workflow runs tests in release mode and builds the optimized app using the same profile, then signs and notarizes it with release credentials.
 

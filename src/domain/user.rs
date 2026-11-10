@@ -1,6 +1,6 @@
 use crate::domain::{affinity::Affinity, ids::UserId, presence::Presence};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct UserSummary {
     pub id: UserId,
     pub display_name: String,

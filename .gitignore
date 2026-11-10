@@ -2,3 +2,7 @@ target
 dist
 .DS_Store
 .zbase
+node_modules
+ui/dist
+gen
+__pycache__

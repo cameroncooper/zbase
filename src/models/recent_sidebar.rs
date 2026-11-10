@@ -10,7 +10,7 @@ use crate::domain::{
 };
 use std::collections::{HashMap, HashSet};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct RecentSidebarRow {
     pub row: SidebarRow,
     pub secondary: String,

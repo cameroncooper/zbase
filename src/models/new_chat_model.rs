@@ -1,6 +1,6 @@
 use crate::domain::user::UserSummary;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct NewChatModel {
     pub open: bool,
     pub is_searching: bool,

@@ -4,22 +4,26 @@ version = "1.0.20"
 edition = "2024"
 default-run = "zbase"
 
-[package.metadata.bundle]
-name = "zBase"
-identifier = "com.zbase.app"
-icon = ["assets/macos/AppIcon.icns"]
-
 [features]
 default = []
 demo-fixtures = []
 macos-updater = []
+# Serve the built `ui/dist` from the binary instead of the Vite dev server.
+# Release and bundle builds enable it; `cargo run` without it needs `npm run dev`.
+custom-protocol = ["tauri/custom-protocol"]
 
 # Keep compiler and Clippy warnings fatal for local builds and CI alike.
 [lints.rust]
 warnings = "deny"
 
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
 [dependencies]
-gpui = { version = "0.2.2", default-features = false, features = ["font-kit"] }
+tauri = { version = "2", features = ["protocol-asset"] }
+tauri-plugin-opener = "2"
+# The composer's file picker (engine/composer.rs), run on the main thread.
+rfd = "0.16"
 unicode-segmentation = "1.12.0"
 tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time", "io-util"] }
 tracing = "0.1"
@@ -38,7 +42,6 @@ ffmpeg-next = "8"
 image = "0.25"
 sha2 = "0.10.9"
 chrono = "0.4.44"
-rust-embed = "8"
 tree-sitter = "0.26.6"
 tree-sitter-highlight = "0.26.6"
 tree-sitter-rust = "0.24.0"
@@ -52,13 +55,3 @@ tree-sitter-go = "0.25.0"
 tree-sitter-toml-ng = "0.7.0"
 tree-sitter-sequel = "0.3.11"
 
-[target.'cfg(windows)'.build-dependencies]
-# Already in the tree through gpui; compiles the Windows icon resource.
-embed-resource = "3"
-
-[target.'cfg(target_os = "macos")'.dependencies]
-# Already in the tree through gpui; used to put check marks on menu items.
-objc = "0.2.7"
-
-[target.'cfg(windows)'.dependencies]
-windows = { version = "0.61.3", features = ["Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_System_Com"] }

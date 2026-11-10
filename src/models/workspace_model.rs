@@ -1,6 +1,6 @@
 use crate::domain::{conversation::ConversationSummary, ids::WorkspaceId};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct WorkspaceModel {
     pub workspace_id: WorkspaceId,
     pub workspace_name: String,

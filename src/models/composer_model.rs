@@ -3,14 +3,14 @@ use crate::domain::{
     ids::{ConversationId, MessageId},
 };
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub enum ComposerMode {
     Compose,
     Edit { message_id: MessageId },
     ReplyInThread { root_id: MessageId },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum AutocompleteCandidate {
     MentionUser {
         username: String,
@@ -38,7 +38,7 @@ impl AutocompleteCandidate {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct AutocompleteState {
     pub trigger: char,
     pub query: String,
@@ -47,7 +47,7 @@ pub struct AutocompleteState {
     pub candidates: Vec<AutocompleteCandidate>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct ComposerModel {
     pub conversation_id: ConversationId,
     pub mode: ComposerMode,
@@ -58,7 +58,7 @@ pub struct ComposerModel {
 
 /// Keybase chat Markdown the composer's format menu can apply. Keybase has no
 /// link syntax (it links bare URLs itself), so there is no "Link" here.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum MarkdownFormat {
     Bold,
     Italic,

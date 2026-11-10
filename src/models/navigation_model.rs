@@ -1,7 +1,7 @@
 use crate::domain::ids::UserId;
 use crate::domain::route::Route;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum RightPaneMode {
     Hidden,
     Thread,
@@ -12,7 +12,7 @@ pub enum RightPaneMode {
     Profile(UserId),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct NavigationModel {
     pub current: Route,
     pub back_stack: Vec<Route>,

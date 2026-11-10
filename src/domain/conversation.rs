@@ -1,7 +1,7 @@
 use crate::domain::{ids::ConversationId, message_preview::MessagePreview};
 use std::collections::HashMap;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct ConversationBadgeCounts {
     pub unread_count: u32,
     pub badge_count: u32,
@@ -9,7 +9,7 @@ pub struct ConversationBadgeCounts {
 
 /// A complete snapshot also clears conversations omitted by the provider.
 /// Partial updates are used for locally confirmed mark-read operations.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct ConversationBadgeState {
     pub counts: HashMap<ConversationId, ConversationBadgeCounts>,
     pub complete: bool,
@@ -59,21 +59,21 @@ pub fn dm_peer_title(title: &str, self_username: Option<&str>) -> String {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum ConversationKind {
     Channel,
     DirectMessage,
     GroupDirectMessage,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize)]
 pub enum ConversationTeamType {
     Unknown,
     Simple,
     Complex,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize)]
 pub struct ConversationGroup {
     pub id: String,
     pub display_name: String,
@@ -130,7 +130,7 @@ impl ConversationSummary {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct ConversationSummary {
     pub id: ConversationId,
     pub title: String,

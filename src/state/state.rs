@@ -117,7 +117,7 @@ pub struct UiTimelineState {
 }
 
 /// How much of a pending attachment has reached the server.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct UploadProgress {
     pub sent_bytes: u64,
     pub total_bytes: u64,

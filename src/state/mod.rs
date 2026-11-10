@@ -13,6 +13,6 @@ pub mod state;
 pub mod store;
 
 pub use action::{DraftKey, UiAction};
-pub use bindings::{ConversationBinding, MessageBinding, WorkspaceBinding};
+pub use bindings::{MessageBinding, WorkspaceBinding};
 pub use state::{AccountState, ConnectionState, UiState};
 pub use store::AppStore;

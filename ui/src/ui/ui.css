@@ -1,0 +1,52 @@
+/* Derived colors from src/views/mod.rs that are functions of the theme rather
+   than palette entries (shell_border, card_shadow, search_match_bg, ...). */
+:root,
+:root[data-theme="light"] {
+  --shell-border: rgba(0, 0, 0, 0.1);
+  --shell-border-strong: rgba(0, 0, 0, 0.2);
+  /* subtle_surface: panel_alt_bg at full opacity in light. */
+  --subtle-surface: var(--panel-alt-bg);
+  --card-shadow: 0 10px 24px rgba(43, 52, 64, 0.05), 0 2px 8px rgba(43, 52, 64, 0.02);
+  --backdrop: rgba(0, 0, 0, 0.25);
+  --search-match-bg: #ffe58f;
+  --search-match-fg: var(--text-primary);
+  --focus-ring: 0 0 0 3px rgba(76, 142, 255, 0.22);
+  /* sidebar_selected_bg/fg/secondary while the window is key. */
+  --selected-bg: var(--sidebar-selected-bg);
+  --selected-fg: #ffffff;
+  --selected-secondary: rgba(255, 255, 255, 0.78);
+  /* The quick switcher's keyboard selection: modal surface + 10% text. */
+  --switcher-selection: color-mix(in srgb, var(--panel-bg) 90%, var(--text-primary) 10%);
+  --hover-wash: rgba(38, 38, 38, 0.06);
+  --hover-wash-strong: rgba(38, 38, 38, 0.1);
+  --hover-wash-soft: rgba(38, 38, 38, 0.05);
+  --hover-wash-button: rgba(38, 38, 38, 0.07);
+  --empty-wash: rgba(38, 38, 38, 0.06);
+}
+
+:root[data-theme="dark"] {
+  --shell-border: rgba(255, 255, 255, 0.1);
+  --shell-border-strong: rgba(255, 255, 255, 0.2);
+  --subtle-surface: rgba(45, 45, 45, 0.88);
+  --card-shadow: 0 10px 24px rgba(0, 0, 0, 0.2), 0 2px 8px rgba(0, 0, 0, 0.1);
+  --backdrop: rgba(0, 0, 0, 0.5);
+  --search-match-bg: #5c4a12;
+  --search-match-fg: #ffd666;
+  --focus-ring: 0 0 0 3px rgba(76, 142, 255, 0.3);
+  --hover-wash: rgba(217, 217, 217, 0.06);
+  --hover-wash-strong: rgba(217, 217, 217, 0.1);
+  --hover-wash-soft: rgba(217, 217, 217, 0.05);
+  --hover-wash-button: rgba(217, 217, 217, 0.07);
+  --empty-wash: rgba(217, 217, 217, 0.08);
+}
+
+/* Unfocused window: the selection turns grey (window_is_active() == false). */
+:root[data-window-inactive] {
+  --selected-bg: #dcdfe4;
+  --selected-fg: var(--text-primary);
+  --selected-secondary: #595959;
+}
+:root[data-theme="dark"][data-window-inactive] {
+  --selected-bg: #3a3a3a;
+  --selected-secondary: var(--text-secondary);
+}

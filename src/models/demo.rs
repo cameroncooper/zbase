@@ -946,9 +946,9 @@ pub(crate) fn demo_conversation_messages(conversation_id: &ConversationId) -> Ve
         DEMO_DESIGN_ID => design_messages(),
         DEMO_DM_ID
             if matches!(
-                crate::app::demo::DemoScene::from_env(),
-                crate::app::demo::DemoScene::FilesMedia
-                    | crate::app::demo::DemoScene::FilesDocuments
+                crate::models::demo_scene::DemoScene::from_env(),
+                crate::models::demo_scene::DemoScene::FilesMedia
+                    | crate::models::demo_scene::DemoScene::FilesDocuments
             ) =>
         {
             demo_files_rows()
@@ -1152,7 +1152,7 @@ impl AppModels {
                 ],
                 filter: String::new(),
                 highlighted_route: Some(route.clone()),
-                width_px: crate::views::sidebar_width_for_style(sidebar_style),
+                width_px: crate::models::sidebar_model::sidebar_width_for_style(sidebar_style),
                 live_previews: Default::default(),
             },
             conversation: ConversationModel {

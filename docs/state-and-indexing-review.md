@@ -91,10 +91,8 @@ Thread replies retain their message text and link interactions in the main chat.
 The latest full run passed all 255 tests: 253 app tests and 2 protocol inventory tests. One opt-in live test is ignored by default. The suite runs with:
 
 ```sh
-cargo test --all-targets --features gpui/runtime_shaders
+cargo test --all-targets
 ```
-
-GPUI's runtime-shader feature avoids the missing Xcode offline Metal compiler on this machine without changing the production dependency configuration.
 
 Tests cover reconnect/resubscription against a mock Unix-socket daemon, rejected subscriptions never reporting online, startup refresh preserving navigation/drafts/thread/pending messages, stale cache responses, edits and deletions during attachment downloads, deletion markers surviving restart, snapshot/subscription ordering, search replay/edit/delete behavior, sync queue coalescing/cancellation, independent catch-up positions, failed command isolation, retained paging cursors, and reaction failure ordering. Existing reducer, rendering, RPC inventory, cache, and search tests run as part of the suite.
 

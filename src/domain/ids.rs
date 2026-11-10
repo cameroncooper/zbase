@@ -1,6 +1,6 @@
 macro_rules! id_type {
     ($name:ident) => {
-        #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+        #[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize)]
         pub struct $name(pub String);
 
         impl $name {

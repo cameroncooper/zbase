@@ -1,0 +1,561 @@
+/* Right pane (views/right_pane, views/profile). Surfaces follow views/mod.rs:
+   right_pane_surface, panel_surface, panel_alt_surface, subtle_surface, shell_border. */
+
+:root {
+  --rp-surface: var(--panel-alt-bg);
+  --rp-panel-surface: var(--panel-bg);
+  --rp-panel-alt-surface: var(--panel-alt-bg);
+  --rp-subtle-surface: var(--panel-alt-bg);
+  --rp-shell-border: rgba(0, 0, 0, 0.1);
+  --rp-hover: color-mix(in srgb, var(--text-primary) 5%, transparent);
+  --rp-hover-strong: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  --rp-search-match-bg: #ffe58f;
+  --rp-search-match-fg: #191919;
+}
+
+:root[data-theme="dark"] {
+  --rp-surface: #242424;
+  --rp-panel-surface: color-mix(in srgb, var(--panel-bg) 55%, transparent);
+  --rp-panel-alt-surface: color-mix(in srgb, var(--panel-alt-bg) 50%, transparent);
+  --rp-subtle-surface: color-mix(in srgb, var(--panel-alt-bg) 88%, transparent);
+  --rp-shell-border: rgba(255, 255, 255, 0.1);
+  --rp-search-match-bg: #5c4a12;
+  --rp-search-match-fg: #ffffff;
+}
+
+.rp-host {
+  height: 100%;
+  flex-shrink: 0;
+  display: flex;
+  overflow: hidden;
+  background: var(--rp-surface);
+}
+
+.rp-host.rp-overlay {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+}
+
+.rp-resize {
+  width: 4px;
+  flex-shrink: 0;
+  height: 100%;
+  background: var(--rp-surface);
+  border-left: 1px solid var(--border);
+  cursor: col-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.rp-resize > span {
+  width: 2px;
+  height: 640px;
+  max-height: 100%;
+  border-radius: 999px;
+  background: var(--border);
+  opacity: 0;
+}
+
+.rp-resize:hover > span {
+  opacity: 1;
+}
+
+.rp-content {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  background: var(--rp-surface);
+  color: var(--text-primary);
+  overflow: hidden;
+}
+
+.rp-pane {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.rp-marker {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* pane_header */
+.rp-header {
+  height: 56px;
+  flex-shrink: 0;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--rp-shell-border);
+}
+
+.rp-header-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.rp-header-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.rp-header-subtitle {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rp-close {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.rp-close:hover {
+  background: var(--rp-hover-strong);
+}
+
+.rp-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.rp-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.rp-scroll::-webkit-scrollbar-thumb {
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--text-primary) 20%, transparent);
+}
+
+.rp-fade-top,
+.rp-fade-bottom {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 16px;
+  pointer-events: none;
+}
+
+.rp-fade-top {
+  top: 0;
+  background: linear-gradient(to bottom, var(--rp-surface), transparent);
+}
+
+.rp-fade-bottom {
+  bottom: 0;
+  background: linear-gradient(to top, var(--rp-surface), transparent);
+}
+
+/* Thread */
+.rp-thread-divider {
+  padding: 12px 16px 8px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.rp-thread-divider-label {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.rp-hairline {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.rp-thread-note {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.rp-thread-composer {
+  padding: 8px 16px 16px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Members */
+.rp-member-row {
+  height: 40px;
+  padding: 0 8px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.rp-member-row:hover,
+.rp-social-row:hover,
+.rp-proof-row.rp-link:hover {
+  background: var(--rp-hover);
+}
+
+.rp-member-name {
+  flex-shrink: 0;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.rp-member-username {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.rp-role {
+  flex-shrink: 0;
+  height: 18px;
+  padding: 0 6px;
+  display: flex;
+  align-items: center;
+  border-radius: 4px;
+  background: var(--rp-hover-strong);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+/* Details */
+.rp-card {
+  flex-shrink: 0;
+  min-width: 0;
+  border-radius: 8px;
+  background: var(--rp-panel-surface);
+  border: 1px solid var(--border);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rp-card-heading {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.rp-details-member {
+  width: 100%;
+  min-width: 0;
+  border-radius: 6px;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.rp-details-member:hover,
+.rp-shared-file:hover,
+.rp-leave:not(.rp-leaving):hover {
+  background: var(--rp-subtle-surface);
+}
+
+.rp-shared-file {
+  border-radius: 6px;
+  background: var(--panel-alt-bg);
+  padding: 6px 8px;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.rp-leave {
+  flex-shrink: 0;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--rp-panel-alt-surface);
+  padding: 12px;
+  font-size: 14px;
+  text-align: center;
+  color: var(--danger);
+  cursor: pointer;
+}
+
+.rp-leave.rp-leaving {
+  cursor: default;
+}
+
+/* Files */
+.rp-files-tabs {
+  padding: 12px 16px;
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.rp-files-tab {
+  flex: 1;
+  padding: 6px 0;
+  border-radius: 6px;
+  border-bottom: 2px solid transparent;
+  font-size: 14px;
+  text-align: center;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.rp-files-tab:hover {
+  background: var(--rp-subtle-surface);
+}
+
+.rp-files-tab.rp-selected {
+  border-bottom-color: var(--accent);
+  background: var(--rp-panel-alt-surface);
+  color: var(--text-primary);
+}
+
+.rp-file-item {
+  position: relative;
+  min-width: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.rp-file-item:hover {
+  background: var(--rp-subtle-surface);
+}
+
+.rp-file-tile {
+  border-radius: 6px;
+  overflow: hidden;
+  position: relative;
+  background: var(--rp-panel-alt-surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.rp-file-tile > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.rp-file-duration {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  border-radius: 2px;
+  padding: 0 4px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #ffffff;
+  font-size: 12px;
+}
+
+.rp-file-jump-overlay {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  border-radius: 2px;
+  background: var(--rp-surface);
+  opacity: 0;
+}
+
+.rp-file-item:hover .rp-file-jump-overlay {
+  opacity: 1;
+}
+
+.rp-file-jump {
+  font-size: 12px;
+  color: var(--text-secondary);
+  border-radius: 2px;
+  padding: 4px;
+  cursor: pointer;
+}
+
+.rp-file-jump:hover {
+  background: var(--rp-panel-alt-surface);
+  color: var(--text-primary);
+}
+
+.rp-file-doc {
+  width: 100%;
+  padding: 8px 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rp-file-meta {
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Search */
+.rp-search-hit {
+  width: 100%;
+  min-width: 0;
+  padding: 10px 8px;
+  border-radius: 6px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.rp-search-hit:hover {
+  background: var(--rp-hover);
+}
+
+.rp-search-hit.rp-selected {
+  background: var(--sidebar-selected-bg);
+  color: #ffffff;
+}
+
+.rp-search-snippet {
+  font-size: 14px;
+  line-height: 21px;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.rp-search-snippet mark {
+  font-weight: 700;
+  background: var(--rp-search-match-bg);
+  color: var(--rp-search-match-fg);
+}
+
+.rp-search-hit.rp-selected mark {
+  background: none;
+  color: inherit;
+  text-decoration: underline;
+}
+
+/* Profile */
+.rp-profile-section {
+  margin: 0 16px;
+  padding: 14px 0;
+  border-top: 1px solid var(--rp-shell-border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rp-social-tab {
+  padding-bottom: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+}
+
+.rp-social-tab:hover,
+.rp-social-tab.rp-selected {
+  color: var(--text-primary);
+}
+
+.rp-social-tab.rp-selected {
+  border-bottom-color: var(--accent);
+}
+
+.rp-social-row,
+.rp-proof-row {
+  padding: 0 8px;
+  margin: 0 -8px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.rp-social-row {
+  height: 36px;
+  cursor: pointer;
+}
+
+.rp-proof-row {
+  height: 32px;
+}
+
+.rp-proof-row.rp-link {
+  cursor: pointer;
+}
+
+.rp-quiet {
+  padding: 4px 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.rp-skeleton {
+  height: 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+}
+
+.rp-truncate {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Profile card (views/profile render_profile_card), shown by the overlay layer. */
+.rp-card-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.rp-profile-card {
+  width: 320px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  box-shadow: 0 10px 24px rgba(43, 52, 64, 0.05), 0 2px 8px rgba(43, 52, 64, 0.02);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+:root[data-theme="dark"] .rp-profile-card {
+  background: color-mix(in srgb, var(--panel-bg) 55%, transparent);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2), 0 2px 8px rgba(0, 0, 0, 0.1);
+}

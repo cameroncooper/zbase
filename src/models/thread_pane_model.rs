@@ -3,7 +3,7 @@ use crate::{
     models::composer_model::AutocompleteState,
 };
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct ThreadPaneModel {
     pub open: bool,
     pub root_message_id: Option<MessageId>,

@@ -1,5 +1,5 @@
 /// A pull request on github.com, identified by its URL path.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize)]
 pub struct GithubPrRef {
     pub owner: String,
     pub repo: String,
@@ -54,7 +54,7 @@ fn is_valid_name(segment: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum GithubPrState {
     Open,
     Draft,
@@ -62,7 +62,7 @@ pub enum GithubPrState {
     Closed,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct GithubCheckCounts {
     pub passed: u32,
     pub failed: u32,
@@ -75,7 +75,7 @@ impl GithubCheckCounts {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum GithubReviewState {
     Approved,
     ChangesRequested,
@@ -83,7 +83,7 @@ pub enum GithubReviewState {
     NoReviews,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct GithubPrStatus {
     pub title: String,
     pub state: GithubPrState,
@@ -100,7 +100,7 @@ pub struct GithubPrStatus {
 }
 
 /// What a PR link preview shows right now. Fetched per viewer and never persisted.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct GithubPrPreview {
     pub pr: GithubPrRef,
     pub status: Option<GithubPrStatus>,

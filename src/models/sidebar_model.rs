@@ -1,7 +1,7 @@
 use crate::domain::{conversation::ConversationGroup, ids::SidebarSectionId, route::Route};
 use std::collections::HashMap;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct SidebarRow {
     pub label: String,
     pub team: Option<ConversationGroup>,
@@ -14,7 +14,7 @@ pub struct SidebarRow {
     pub muted: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct SidebarSection {
     pub id: SidebarSectionId,
     pub title: String,
@@ -22,7 +22,7 @@ pub struct SidebarSection {
     pub collapsed: bool,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct SidebarModel {
     pub sections: Vec<SidebarSection>,
     pub recent_rows: Vec<super::recent_sidebar::RecentSidebarRow>,
@@ -37,7 +37,7 @@ pub struct SidebarModel {
 }
 
 /// Conversation rows may represent people or a simple team's general channel.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum SidebarAvatar {
     Participants(Vec<super::conversation_model::AvatarParticipant>),
     Team(String),
@@ -135,6 +135,19 @@ impl SidebarModel {
             ),
             None => (usize::MAX, String::new()),
         });
+    }
+}
+
+pub const SIDEBAR_WIDTH_PX: f32 = 236.0;
+/// Previews put a 32px avatar, a time and a message beside each name; they get
+/// more room so common names still fit before anything truncates.
+pub const PREVIEWS_SIDEBAR_WIDTH_PX: f32 = 280.0;
+
+/// Default sidebar width for a row style.
+pub fn sidebar_width_for_style(style: crate::models::settings_model::SidebarStyle) -> f32 {
+    match style {
+        crate::models::settings_model::SidebarStyle::Compact => SIDEBAR_WIDTH_PX,
+        crate::models::settings_model::SidebarStyle::Previews => PREVIEWS_SIDEBAR_WIDTH_PX,
     }
 }
 

@@ -6,20 +6,20 @@ use crate::domain::{
 };
 use std::collections::HashMap;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct InlineEmojiRender {
     pub alias: String,
     pub unicode: Option<String>,
     pub asset_path: Option<String>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct ReactionActorRender {
     pub user_id: String,
     pub display_name: String,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct MessageReactionRender {
     pub emoji: String,
     pub source_ref: Option<EmojiSourceRef>,
@@ -28,14 +28,14 @@ pub struct MessageReactionRender {
     pub reacted_by_me: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct MessageRow {
     pub author: UserSummary,
     pub message: MessageRecord,
     pub show_header: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum SystemEventIcon {
     Join,
     Leave,
@@ -47,7 +47,7 @@ pub enum SystemEventIcon {
     Info,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum EventSpan {
     Actor(String),
     Text(String),
@@ -59,13 +59,13 @@ pub enum EventSpan {
     UserLink(UserId),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct SystemEventRow {
     pub icon: SystemEventIcon,
     pub spans: Vec<EventSpan>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 #[expect(
     clippy::large_enum_variant,
     reason = "Message rows dominate the timeline; keep them inline without a per-row allocation."
@@ -78,7 +78,22 @@ pub enum TimelineRow {
     LoadingIndicator(String),
 }
 
-#[derive(Clone, Debug, Default)]
+pub const QUICK_REACT_EMOJI: &[(&str, &str)] = &[
+    ("+1", "\u{1F44D}"),
+    ("heart", "\u{2764}\u{FE0F}"),
+    ("joy", "\u{1F602}"),
+    ("tada", "\u{1F389}"),
+    ("eyes", "\u{1F440}"),
+];
+
+/// Window content size in pixels; kept free of UI framework types.
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize)]
+pub struct ViewportSize {
+    pub width: f32,
+    pub height: f32,
+}
+
+#[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct TimelineModel {
     pub conversation_id: ConversationId,
     pub current_user_id: Option<UserId>,
@@ -108,7 +123,7 @@ pub struct TimelineModel {
     pub hovered_message_window_top: Option<f32>,
     /// Hovered message container width in window coords.
     pub hovered_message_window_width: Option<f32>,
-    pub hovered_message_viewport_size: Option<gpui::Size<f32>>,
+    pub hovered_message_viewport_size: Option<ViewportSize>,
     /// Whether the hover toolbar is settled (mouse was still long enough).
     pub hover_toolbar_settled: bool,
     pub typing_text: Option<String>,
@@ -124,7 +139,7 @@ pub struct TimelineModel {
 
 /// The loaded replies to one thread root: distinct repliers in the order they
 /// first replied (at most [`ThreadSummary::MAX_REPLIERS`]) and the newest reply's time.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct ThreadSummary {
     pub repliers: Vec<UserSummary>,
     pub last_reply_ms: Option<i64>,
@@ -167,7 +182,7 @@ pub fn thread_summaries(rows: &[TimelineRow]) -> HashMap<MessageId, ThreadSummar
     summaries
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct QuickReactRecent {
     pub alias: String,
     pub unicode: Option<String>,

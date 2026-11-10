@@ -7,7 +7,7 @@ pub fn parse_message_text(body: &str) -> Vec<MessageFragment> {
     fragments
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize)]
 pub enum CodeLanguage {
     Rust,
     Python,
@@ -100,7 +100,7 @@ fn parse_code_fragment_at(body: &str, backtick_index: usize) -> Option<(MessageF
     ))
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, serde::Serialize)]
 enum PendingKind {
     Text,
     Quote,

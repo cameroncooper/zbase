@@ -8,7 +8,8 @@ The `build-windows` job runs on `windows-2025` and calls `scripts/windows/build_
 
 1. Downloads the pinned FFmpeg LGPL shared build from [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) and verifies its SHA-256. It pins a month-end autobuild because those stay published; daily builds are removed after about a month.
 2. Runs the Rust test suite in release mode.
-3. Builds `zbase.exe`. On Windows the C and C++ runtimes are linked statically (`.cargo/config.toml`), so users need no Visual C++ Redistributable. `build.rs` embeds the app icon and the Common Controls manifest GPUI requires.
+3. Builds the web view (`npm ci`, `npm run build`), then `zbase.exe` with the `custom-protocol` feature, which embeds `ui/dist`. On Windows the C and C++ runtimes are linked statically (`.cargo/config.toml`), so users need no Visual C++ Redistributable. `tauri-build` (in `build.rs`) embeds the app icon and the application manifest.
+   It also downloads Microsoft's WebView2 bootstrapper into the stage directory; the installer runs it only when no WebView2 Runtime is registered.
 4. Stages `zbase.exe`, the FFmpeg DLLs and a `licenses` folder (Keybase emoji, FFmpeg LGPL text and a note naming the exact FFmpeg build).
 5. Packages them with Inno Setup (`scripts/windows/zbase.iss`) into a per-user installer: no administrator prompt, installed under `%LOCALAPPDATA%\Programs\zBase`, with a Start Menu entry and an uninstaller under **Settings → Apps**.
 

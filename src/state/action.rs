@@ -8,7 +8,7 @@ use crate::domain::{
 
 use super::state::TimelineKey;
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize)]
 pub enum DraftKey {
     Conversation(ConversationId),
     Thread(MessageId),

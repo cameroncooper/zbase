@@ -174,6 +174,15 @@ jobs:
           key: rust-macos15-arm64-${{ steps.toolchain.outputs.rust-key }}-${{ hashFiles('Cargo.lock', 'scripts/macos/build_media_deps.sh') }}-${{ github.sha }}
           restore-keys: |
             rust-macos15-arm64-${{ steps.toolchain.outputs.rust-key }}-${{ hashFiles('Cargo.lock', 'scripts/macos/build_media_deps.sh') }}-
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - name: Build the web view
+        # The release binary embeds ui/dist, so the tests need it too.
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
       - name: Prepare pinned updater framework
         run: scripts/macos/prepare_sparkle.sh
       - name: Packaging integration tests
@@ -182,7 +191,7 @@ jobs:
         env:
           DYLD_FRAMEWORK_PATH: ${{ github.workspace }}/dist/sparkle
         id: rust-tests
-        run: cargo test --release --locked --all-targets --features gpui/runtime_shaders,macos-updater --timings
+        run: cargo test --release --locked --all-targets --features custom-protocol,macos-updater --timings
       - name: Build and verify self-contained app
         run: |
           scripts/macos/build_app_bundle.sh release

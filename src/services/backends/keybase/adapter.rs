@@ -90,7 +90,7 @@ use super::{
 };
 
 use crate::services::local_store::paths as store_paths;
-use crate::util::video_decoder::extract_video_thumbnail_to_file;
+use crate::util::video_thumbnail::extract_video_thumbnail_to_file;
 
 fn benchmark_read_only() -> bool {
     std::env::var("ZBASE_BENCH_READ_ONLY").is_ok_and(|value| value == "1")

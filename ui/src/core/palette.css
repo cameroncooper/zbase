@@ -1,0 +1,92 @@
+/* Generated from the gpui palettes in src/views/mod.rs (LIGHT_PALETTE / DARK_PALETTE).
+   The shell sets data-theme on <html> from Settings › Theme. */
+:root,
+:root[data-theme="light"] {
+  --app-bg: #ffffff;
+  --titlebar-bg: #ffffff;
+  --titlebar-surface: #e6e6e6;
+  --rail-bg: #3663ea;
+  --rail-surface: #4c8eff;
+  --sidebar-bg: #f2f4f7;
+  --main-bg: #ffffff;
+  --panel-bg: #ffffff;
+  --panel-alt-bg: #f0f0f0;
+  --border: #e6e6e6;
+  --text-primary: #262626;
+  --text-secondary: #666666;
+  --text-inverted: #ffffff;
+  --text-muted-inverted: #cccccc;
+  --accent: #4c8eff;
+  --link: #3060de;
+  --unread-indicator: #ff6f21;
+  --accent-soft: #ebf2fc;
+  --accent-strong: #3663ea;
+  --sidebar-selected-bg: #3663ea;
+  --sidebar-hover-bg: #e4e7ec;
+  --field-bg: #f5f6f8;
+  --field-border: #d6d9de;
+  --new-messages: #d92d3f;
+  --success: #37bd99;
+  --success-soft: #e8faf6;
+  --warning: #75574e;
+  --warning-soft: #fffdcc;
+  --danger: #eb253b;
+  --danger-soft: #faf2ed;
+  --affinity-positive: #087f63;
+  --affinity-positive-soft: #e8faf6;
+  --affinity-broken: #c81e33;
+  --affinity-broken-soft: #faf2ed;
+  --mention: #3663ea;
+  --mention-soft: #ebf2fc;
+  --mention-you: #191919;
+  --mention-you-soft: #ffffc0;
+  --inline-code-foreground: #3663ea;
+  --inline-code-background: #faf2ed;
+  --selection: #4c8eff4d;
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --app-bg: #191919;
+  --titlebar-bg: #191919;
+  --titlebar-surface: #333333;
+  --rail-bg: #2d2d2d;
+  --rail-surface: #3f3f3f;
+  --sidebar-bg: #202020;
+  --main-bg: #191919;
+  --panel-bg: #202020;
+  --panel-alt-bg: #2d2d2d;
+  --border: #3b3b3b;
+  --text-primary: #d9d9d9;
+  --text-secondary: #a3a3a3;
+  --text-inverted: #ffffff;
+  --text-muted-inverted: #cccccc;
+  --accent: #4c8eff;
+  --link: #6a9dff;
+  --unread-indicator: #ff6f21;
+  --accent-soft: #192344;
+  --accent-strong: #3b6fd6;
+  --sidebar-selected-bg: #2b4a85;
+  --sidebar-hover-bg: #2c2c2c;
+  --field-bg: #202020;
+  --field-border: #3b3b3b;
+  --new-messages: #ff5c6e;
+  --success: #37bd99;
+  --success-soft: #1f3a33;
+  --warning: #ffb800;
+  --warning-soft: #3b3115;
+  --danger: #ff4d61;
+  --danger-soft: #3b2124;
+  --affinity-positive: #58d5b2;
+  --affinity-positive-soft: #193b32;
+  --affinity-broken: #ff6b7d;
+  --affinity-broken-soft: #3b1b20;
+  --mention: #73a6ff;
+  --mention-soft: #192344;
+  --mention-you: #ffd75e;
+  --mention-you-soft: #4a3f12;
+  --inline-code-foreground: #73a6ff;
+  --inline-code-background: #2d2d2d;
+  --selection: #4c8eff4d;
+  color-scheme: dark;
+}

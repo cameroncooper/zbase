@@ -1,5 +1,7 @@
 #[cfg(any(test, feature = "demo-fixtures"))]
 pub(crate) mod demo;
+#[cfg(any(test, feature = "demo-fixtures"))]
+pub(crate) mod demo_scene;
 
 pub mod app_model;
 pub mod call_model;
@@ -8,6 +10,7 @@ pub mod conversation_model;
 pub mod emoji_picker_model;
 pub mod file_upload_model;
 pub mod find_in_chat_model;
+pub mod link_previews;
 pub mod navigation_model;
 pub mod new_chat_model;
 pub mod notifications_model;
@@ -19,6 +22,8 @@ pub mod search_model;
 pub mod settings_model;
 pub mod sidebar_model;
 pub mod sidebar_preview;
+pub mod store_sync;
+mod sync_signatures;
 pub mod thread_pane_model;
 pub mod timeline_model;
 pub mod workspace_model;
@@ -219,7 +224,7 @@ impl AppModels {
                 sections: vec![],
                 filter: String::new(),
                 highlighted_route: Some(route),
-                width_px: crate::views::sidebar_width_for_style(sidebar_style),
+                width_px: sidebar_model::sidebar_width_for_style(sidebar_style),
                 live_previews: Default::default(),
             },
             conversation: ConversationModel {
@@ -483,11 +488,11 @@ impl AppModels {
         let changed = self.settings.sidebar_style != style;
         // A width the user dragged stays; the previous style's default follows the style.
         if changed
-            && (self.sidebar.width_px - crate::views::sidebar_width_for_style(self.sidebar.style))
+            && (self.sidebar.width_px - sidebar_model::sidebar_width_for_style(self.sidebar.style))
                 .abs()
                 < 0.5
         {
-            self.sidebar.width_px = crate::views::sidebar_width_for_style(style);
+            self.sidebar.width_px = sidebar_model::sidebar_width_for_style(style);
         }
         self.settings.sidebar_style = style;
         self.sidebar.style = style;
@@ -1554,8 +1559,8 @@ impl AppModels {
     }
 
     pub fn refresh_quick_react_recent(&mut self) {
+        use crate::models::timeline_model::QUICK_REACT_EMOJI;
         use crate::models::timeline_model::QuickReactRecent;
-        use crate::views::timeline::QUICK_REACT_EMOJI;
 
         let mut builtin: std::collections::HashSet<String> = std::collections::HashSet::new();
         for (alias, unicode) in QUICK_REACT_EMOJI {

@@ -4,7 +4,7 @@ use crate::domain::{
     route::Route,
 };
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum SearchFilter {
     FromUser(String),
     InChannel(String),
@@ -13,7 +13,7 @@ pub enum SearchFilter {
     MentionsMe,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct SearchResult {
     pub conversation_id: ConversationId,
     pub route: Route,

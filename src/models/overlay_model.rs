@@ -2,7 +2,7 @@ use crate::domain::attachment::AttachmentSource;
 use crate::domain::ids::{MessageId, UserId};
 use crate::models::file_upload_model::FileUploadLightboxModel;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct SidebarHoverTooltip {
     pub text: String,
     pub anchor_x: f32,
@@ -10,14 +10,14 @@ pub struct SidebarHoverTooltip {
     pub width_px: f32,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct ReactionHoverTooltip {
     pub text: String,
     pub anchor_x: f32,
     pub anchor_y: f32,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct FullscreenImageOverlay {
     pub source: AttachmentSource,
     pub caption: Option<String>,
@@ -25,7 +25,7 @@ pub struct FullscreenImageOverlay {
     pub height: Option<u32>,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct OverlayModel {
     pub new_chat_open: bool,
     pub quick_switcher_open: bool,

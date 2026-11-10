@@ -151,5 +151,6 @@ scripts/macos/prepare_sparkle.sh
 export SPARKLE_DIR="$PWD/dist/sparkle"
 export DYLD_FRAMEWORK_PATH="$SPARKLE_DIR"
 scripts/macos/test_updater_bridge.sh
-cargo test --locked --all-targets --features gpui/runtime_shaders,macos-updater
+npm ci && npm run build
+cargo test --locked --all-targets --features custom-protocol,macos-updater
 ```

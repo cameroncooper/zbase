@@ -2,7 +2,7 @@ use crate::domain::channel_details::ChannelDetails;
 use crate::domain::conversation::ConversationSummary;
 use crate::domain::pins::PinnedItem;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct AvatarParticipant {
     pub display_name: String,
     pub asset: Option<String>,
@@ -10,7 +10,7 @@ pub struct AvatarParticipant {
     pub presence: Option<crate::domain::presence::Presence>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct ConversationModel {
     pub summary: ConversationSummary,
     pub pinned_message: Option<PinnedItem>,

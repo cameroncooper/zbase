@@ -53,9 +53,6 @@ if (-not $FfmpegDir) {
     }
 }
 
-if (-not $env:GPUI_FXC_PATH) {
-    $env:GPUI_FXC_PATH = Find-Tool 'fxc.exe' @("${env:ProgramFiles(x86)}\Windows Kits\10\bin\10.*\x64\fxc.exe")
-}
 if (-not $env:LIBCLANG_PATH) {
     $env:LIBCLANG_PATH = Split-Path (Find-Tool 'clang.exe' @("$env:ProgramFiles\LLVM\bin\clang.exe"))
 }
@@ -69,13 +66,18 @@ Push-Location $repo
 try {
     # Cargo reports progress on stderr, which Windows PowerShell treats as an error under 'Stop'.
     $ErrorActionPreference = 'Continue'
+    # The binary embeds the built web view (ui/dist), so build it first.
+    npm ci --no-audit --no-fund
+    if ($LASTEXITCODE -ne 0) { throw 'npm ci failed' }
+    npm run build
+    if ($LASTEXITCODE -ne 0) { throw 'web view build failed' }
     if ($Test) {
         # Test binaries load the FFmpeg DLLs from PATH.
         $env:PATH = "$(Join-Path $FfmpegDir 'bin');$env:PATH"
-        cargo test --locked --release --all-targets --features gpui/runtime_shaders
+        cargo test --locked --release --all-targets --features custom-protocol
         if ($LASTEXITCODE -ne 0) { throw 'cargo test failed' }
     }
-    cargo build --locked --release --features gpui/runtime_shaders
+    cargo build --locked --release --features custom-protocol
     $ErrorActionPreference = 'Stop'
     if ($LASTEXITCODE -ne 0) { throw 'cargo build failed' }
     $targetDir = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $repo 'target' }
@@ -84,6 +86,9 @@ try {
     New-Item -ItemType Directory $stage | Out-Null
     Copy-Item (Join-Path $targetDir 'release\zbase.exe') $stage
     Copy-Item (Join-Path $FfmpegDir 'bin\*.dll') $stage
+    # Windows 10 may lack the WebView2 runtime; the installer runs Microsoft's
+    # small online bootstrapper only when it is missing.
+    Invoke-WebRequest -UseBasicParsing 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile (Join-Path $stage 'MicrosoftEdgeWebview2Setup.exe')
 
     $licenses = New-Item -ItemType Directory (Join-Path $stage 'licenses\FFmpeg')
     Copy-Item (Join-Path $repo 'assets\emoji\LICENSE.keybase') (Join-Path $stage 'licenses\Keybase.txt')
