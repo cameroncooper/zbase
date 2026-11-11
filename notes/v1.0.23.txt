@@ -1,0 +1,10 @@
+## What's Changed
+* Desktop notifications that open the message when clicked by @greimela in https://github.com/cameroncooper/zbase/pull/65
+* Use compact dropdowns for desktop and mobile notification settings by @cameroncooper in https://github.com/cameroncooper/zbase/pull/66
+* Hide the app instead of closing the main window on macOS by @AmineKhaldi in https://github.com/cameroncooper/zbase/pull/64
+* Keep PR comments updated with macOS and Windows build downloads by @cameroncooper in https://github.com/cameroncooper/zbase/pull/67
+
+## New Contributors
+* @AmineKhaldi made their first contribution in https://github.com/cameroncooper/zbase/pull/64
+
+**Full Changelog**: https://github.com/cameroncooper/zbase/compare/v1.0.22...v1.0.23
