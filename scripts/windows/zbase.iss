@@ -8,6 +8,9 @@
 #ifndef StageDir
   #error StageDir must be defined
 #endif
+; zbase.exe sets the same app user model ID (APP_ID in its notifications
+; service); toasts and taskbar grouping need the two to match.
+#define AppUserModelId "com.zbase.app"
 
 [Setup]
 AppId={{6F0E4C1B-6E2A-4F5B-9C1D-2B7A9E3F8D41}
@@ -39,8 +42,14 @@ Source: "{#StageDir}\*.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#StageDir}\licenses\*"; DestDir: "{app}\licenses"; Flags: ignoreversion recursesubdirs
 
 [Icons]
-Name: "{autoprograms}\zBase"; Filename: "{app}\zbase.exe"
-Name: "{autodesktop}\zBase"; Filename: "{app}\zbase.exe"; Tasks: desktopicon
+Name: "{autoprograms}\zBase"; Filename: "{app}\zbase.exe"; AppUserModelID: "{#AppUserModelId}"
+Name: "{autodesktop}\zBase"; Filename: "{app}\zbase.exe"; Tasks: desktopicon; AppUserModelID: "{#AppUserModelId}"
+
+; zbase.exe registers its app ID on launch, and Windows keeps per-app
+; notification settings once a toast shows; remove both on uninstall.
+[Registry]
+Root: HKCU; Subkey: "Software\Classes\AppUserModelId\{#AppUserModelId}"; Flags: uninsdeletekey dontcreatekey
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Notifications\Settings\{#AppUserModelId}"; Flags: uninsdeletekey dontcreatekey
 
 [Run]
 Filename: "{app}\zbase.exe"; Description: "{cm:LaunchProgram,zBase}"; Flags: nowait postinstall skipifsilent

@@ -5499,7 +5499,7 @@ impl AppWindow {
                 conversation_id: notification.conversation_id.clone(),
                 message_id: notification.message_id.clone(),
             },
-            notification.sound,
+            state.notifications.notify_sound,
         );
     }
 
@@ -6778,6 +6778,12 @@ impl AppWindow {
             self.persist_settings();
             self.refresh(cx);
         }
+    }
+
+    /// Applies at once; a failed save to Keybase puts it back and says so.
+    pub(crate) fn set_notification_sound(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.dispatch_ui_action(UiAction::SetNotifySound { enabled });
+        self.refresh(cx);
     }
 
     pub(crate) fn set_reduced_motion(&mut self, reduced: bool, cx: &mut Context<Self>) {
@@ -9457,6 +9463,7 @@ impl AppWindow {
             sidebar_mode: self.models.sidebar.mode,
             updates: self.update_ui.snapshot.clone(),
             notification_permission: self.notification_permission,
+            notification_sound: self.app_store.snapshot().notifications.notify_sound,
             account: app.current_user_id.as_ref().map(|user_id| {
                 crate::views::preferences::AccountSummary {
                     display_name: if app.current_user_display_name.trim().is_empty() {

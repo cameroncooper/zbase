@@ -37,6 +37,8 @@ pub struct PreferencesContext {
     pub sidebar_mode: SidebarMode,
     pub updates: crate::services::updates::UpdateSnapshot,
     pub notification_permission: NotificationPermission,
+    /// Keybase's "Play a sound for new messages" setting.
+    pub notification_sound: bool,
     pub account: Option<AccountSummary>,
 }
 
@@ -233,7 +235,12 @@ impl PreferencesView {
                     ))
                     .when_some(
                         notifications_row(context.notification_permission),
-                        |content, row| content.child(section("Notifications", vec![row])),
+                        |content, row| {
+                            content.child(section(
+                                "Notifications",
+                                vec![row, sound_row(context.notification_sound, app)],
+                            ))
+                        },
                     )
                     .child(section("Accessibility", vec![motion_row]))
                     .child(section(
@@ -255,14 +262,14 @@ impl PreferencesView {
     }
 }
 
-/// Whether macOS shows zBase's banners, with the way to change it. `None` when
+/// Whether the OS shows zBase's banners, with the way to change it. `None` when
 /// this build cannot post notifications.
 fn notifications_row(permission: NotificationPermission) -> Option<AnyElement> {
     let (description, label, act): (&'static str, &'static str, fn()) = match permission {
         NotificationPermission::Unavailable => return None,
         NotificationPermission::Allowed => (
             "On. Each conversation's Keybase notification level decides which messages notify.",
-            "Open System Settings…",
+            notifications_service::OPEN_SETTINGS_LABEL,
             notifications_service::open_settings,
         ),
         NotificationPermission::NotAsked => (
@@ -271,13 +278,14 @@ fn notifications_row(permission: NotificationPermission) -> Option<AnyElement> {
             notifications_service::request_permission,
         ),
         NotificationPermission::Denied => (
-            "Off. macOS isn't allowing notifications from zBase.",
-            "Open System Settings…",
+            notifications_service::DENIED_DESCRIPTION,
+            notifications_service::OPEN_SETTINGS_LABEL,
             notifications_service::open_settings,
         ),
+        // Only macOS reports this.
         NotificationPermission::Silenced => (
             "Off. zBase's alert style in System Settings is None.",
-            "Open System Settings…",
+            notifications_service::OPEN_SETTINGS_LABEL,
             notifications_service::open_settings,
         ),
     };
@@ -285,6 +293,22 @@ fn notifications_row(permission: NotificationPermission) -> Option<AnyElement> {
         .on_click(move |_, _, _| act())
         .into_any_element();
     Some(setting_row("Desktop notifications", description, button))
+}
+
+/// Keybase's own setting, so it matches the Keybase app.
+fn sound_row(on: bool, app: &WeakEntity<AppWindow>) -> AnyElement {
+    setting_row(
+        "Play a sound",
+        "For new message notifications. Saved to the same setting as the Keybase app.",
+        toggle(
+            "preferences-notification-sound",
+            on,
+            app,
+            move |this, cx| {
+                this.set_notification_sound(!on, cx);
+            },
+        ),
+    )
 }
 
 /// The sample uses the same inherited scale as the rest of Settings.

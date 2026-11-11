@@ -368,6 +368,7 @@ impl ChatBackend for KeybaseBackend {
                 | RoutedBackendCommand::LeaveChannel { .. }
                 | RoutedBackendCommand::JoinChannel { .. }
                 | RoutedBackendCommand::SetConversationNotificationSettings { .. }
+                | RoutedBackendCommand::SetNotifySound { .. }
                 | RoutedBackendCommand::FollowUser { .. }
                 | RoutedBackendCommand::UnfollowUser { .. } => {
                     return Err(BackendError::OperationFailed(
@@ -1877,20 +1878,8 @@ impl ChatBackend for KeybaseBackend {
                             "invalid provider conversation reference".into(),
                         )
                     })?;
-                let path = socket_path().ok_or_else(|| {
-                    BackendError::OperationFailed("Keybase connection is unavailable".into())
-                })?;
-                let runtime = Builder::new_current_thread().enable_all().build()?;
-                let raw_id_for_rpc = raw_id.clone();
-                runtime.block_on(async move {
-                    let transport = FramedMsgpackTransport::connect(&path).await?;
-                    let mut client = KeybaseRpcClient::new(transport);
-                    set_conversation_notification_settings_rpc(
-                        &mut client,
-                        &raw_id_for_rpc,
-                        settings,
-                    )
-                    .await
+                with_keybase_client(async |client| {
+                    set_conversation_notification_settings_rpc(client, &raw_id, settings).await
                 })?;
                 let conversation_id =
                     ConversationId::new(format!("kb_conv:{}", hex_encode(&raw_id)));
@@ -1898,6 +1887,10 @@ impl ChatBackend for KeybaseBackend {
                     conversation_id,
                     settings,
                 }])
+            }
+            RoutedBackendCommand::SetNotifySound { enabled, .. } => {
+                with_keybase_client(async |client| save_notify_sound(client, enabled).await)?;
+                Ok(Vec::new())
             }
             RoutedBackendCommand::LeaveChannel {
                 conversation,
@@ -2115,6 +2108,11 @@ async fn run_listener_session(
     let counts = parse_badge_state(&badges)
         .ok_or_else(|| io::Error::other("invalid Keybase badge snapshot"))?;
     emit_badge_state(sender, local_store, counts, true)?;
+    if let Some(enabled) = notify_sound {
+        sender
+            .send(BackendEvent::NotifySoundLoaded { enabled })
+            .map_err(|_| io::Error::other("UI closed"))?;
+    }
     sender
         .send(BackendEvent::AccountConnected {
             account_id: account_id.clone(),
@@ -2342,7 +2340,7 @@ async fn run_listener_session(
                 }
             }
         }
-        if let Some(notification) = parse_desktop_notification_from_notify(&event, notify_sound)
+        if let Some(notification) = parse_desktop_notification_from_notify(&event)
             && sender
                 .send(BackendEvent::DesktopNotification(notification))
                 .is_err()
@@ -10173,7 +10171,6 @@ fn extract_live_message_id_from_valid_message(value: &Value) -> Option<MessageId
 /// `displayDesktopNotification`; reactions open the message reacted to.
 fn parse_desktop_notification_from_notify(
     event: &KeybaseNotifyEvent,
-    sound: bool,
 ) -> Option<DesktopNotification> {
     if event.method_name() != "chat.1.NotifyChat.NewChatActivity" {
         return None;
@@ -10211,22 +10208,66 @@ fn parse_desktop_notification_from_notify(
         conversation: extract_conv_from_notify(event)
             .and_then(|conv| parse_inbox_ui_item(conv, None))
             .map(|conversation| conversation.summary),
-        sound,
     })
 }
 
-/// Keybase's "Play a sound for new messages" setting, off unless set.
-async fn fetch_notify_sound(client: &mut KeybaseRpcClient) -> bool {
+const NOTIFY_SOUND_PATH: &str = "notifySound";
+
+/// Keybase's "Play a sound for new messages" setting: off when never set,
+/// `None` when it could not be read, so a failed read keeps the last value.
+async fn fetch_notify_sound(client: &mut KeybaseRpcClient) -> Option<bool> {
     let args = vec![Value::Map(vec![(
         Value::from("path"),
-        Value::from("notifySound"),
+        Value::from(NOTIFY_SOUND_PATH),
     )])];
-    client
+    let value = client
         .call("keybase.1.config.guiGetValue", args)
         .await
-        .ok()
-        .and_then(|value| map_get(&value, "b").and_then(as_bool))
-        .unwrap_or(false)
+        .ok()?;
+    Some(map_get(&value, "b").and_then(as_bool).unwrap_or(false))
+}
+
+/// Saves the sound setting where the Keybase app keeps it. Each app reads
+/// it when it starts or reconnects.
+async fn save_notify_sound(client: &mut KeybaseRpcClient, enabled: bool) -> io::Result<()> {
+    client
+        .call(
+            "keybase.1.config.guiSetValue",
+            vec![Value::Map(vec![
+                (Value::from("path"), Value::from(NOTIFY_SOUND_PATH)),
+                (
+                    Value::from("value"),
+                    Value::Map(vec![
+                        (Value::from("isNull"), Value::from(false)),
+                        (Value::from("b"), Value::from(enabled)),
+                    ]),
+                ),
+            ])],
+        )
+        .await
+        .map(|_| ())
+}
+
+/// One-off commands that answer before `execute` returns, so they finish in
+/// the order the UI sent them. Bounded like the listener's own setup.
+const ONE_OFF_RPC_TIMEOUT: Duration = Duration::from_secs(15);
+
+fn with_keybase_client<T>(
+    call: impl AsyncFnOnce(&mut KeybaseRpcClient) -> io::Result<T>,
+) -> Result<T, BackendError> {
+    let path = socket_path()
+        .ok_or_else(|| BackendError::OperationFailed("Keybase connection is unavailable".into()))?;
+    let runtime = Builder::new_current_thread().enable_all().build()?;
+    let result = runtime.block_on(async move {
+        tokio::time::timeout(ONE_OFF_RPC_TIMEOUT, async move {
+            let transport = FramedMsgpackTransport::connect(&path).await?;
+            let mut client = KeybaseRpcClient::new(transport);
+            call(&mut client).await
+        })
+        .await
+        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "Keybase did not answer"))?
+    })?;
+    Ok(result)
 }
 
 fn parse_live_reaction_map_deltas_from_notify(
@@ -16677,6 +16718,7 @@ mod tests {
             let observer = tokio::spawn(async move {
                 let mut connected = 0;
                 let mut disconnected = 0;
+                let mut sound_loads = 0;
                 let mut badge_counts = Vec::new();
                 let deadline = Instant::now() + Duration::from_secs(5);
                 loop {
@@ -16684,6 +16726,11 @@ mod tests {
                         match event {
                             BackendEvent::AccountConnected { .. } => connected += 1,
                             BackendEvent::AccountDisconnected { .. } => disconnected += 1,
+                            // The server answers notifySound with true.
+                            BackendEvent::NotifySoundLoaded { enabled } => {
+                                assert!(enabled);
+                                sound_loads += 1;
+                            }
                             BackendEvent::ConversationBadgesUpdated { counts, complete, .. } => {
                                 assert!(complete);
                                 badge_counts.push(counts[&ConversationId::new("kb_conv:abcd")].unread_count);
@@ -16698,6 +16745,7 @@ mod tests {
                     tokio::time::sleep(Duration::from_millis(5)).await;
                 }
                 assert!(disconnected >= 1);
+                assert_eq!(sound_loads, 2);
                 assert_eq!(badge_counts, vec![5, 0, 5, 0]);
                 cancel.store(true, Ordering::Relaxed);
             });
@@ -18349,16 +18397,14 @@ mod tests {
     #[test]
     fn desktop_notification_follows_keybase_flag_and_snippet() {
         let event = incoming_notification_event(true, notification_text_body("hi"));
-        let notification =
-            parse_desktop_notification_from_notify(&event, true).expect("notification");
+        let notification = parse_desktop_notification_from_notify(&event).expect("notification");
         assert_eq!(notification.conversation_id.0, "kb_conv:aabb");
         assert_eq!(notification.message_id.0, "44");
         assert_eq!(notification.author, "alice");
         assert_eq!(notification.snippet, "alice: hi");
-        assert!(notification.sound);
 
         let quiet = incoming_notification_event(false, notification_text_body("hi"));
-        assert_eq!(parse_desktop_notification_from_notify(&quiet, true), None);
+        assert_eq!(parse_desktop_notification_from_notify(&quiet), None);
     }
 
     #[test]
@@ -18377,8 +18423,7 @@ mod tests {
             ),
         ]);
         let event = incoming_notification_event(true, reaction);
-        let notification =
-            parse_desktop_notification_from_notify(&event, false).expect("notification");
+        let notification = parse_desktop_notification_from_notify(&event).expect("notification");
         assert_eq!(notification.message_id.0, "40");
     }
 
