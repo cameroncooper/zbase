@@ -3,8 +3,8 @@
 //! on who is looking.
 
 use crate::domain::github_pr::{
-    GithubCheckCounts, GithubPrPreview, GithubPrRef, GithubPrState, GithubPrStatus,
-    GithubReviewState,
+    GithubCheckCounts, GithubComment, GithubCommentRef, GithubPrPreview, GithubPrRef,
+    GithubPrState, GithubPrStatus, GithubReviewState,
 };
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -448,7 +448,78 @@ async fn fetch_batch_async(
         count = refs.len(),
         "github pr response decoded"
     );
-    parse_batch_response(&value, refs, token, reset_wait)
+    let mut outcome = parse_batch_response(&value, refs, token, reset_wait);
+    if let FetchOutcome::Fetched { token, statuses } = &mut outcome {
+        let mut tasks = tokio::task::JoinSet::new();
+        for (index, (pr, result)) in statuses.iter().enumerate() {
+            if matches!(result, PrFetch::Found(_)) && pr.comment.is_some() {
+                let client = client.clone();
+                let token = token.clone();
+                let pr = pr.clone();
+                tasks.spawn(async move { (index, fetch_comment(&client, &token, &pr).await) });
+            }
+        }
+        while let Some(result) = tasks.join_next().await {
+            if let Ok((index, comment)) = result
+                && let PrFetch::Found(status) = &mut statuses[index].1
+            {
+                status.comment = comment;
+            }
+        }
+    }
+    outcome
+}
+
+async fn fetch_comment(
+    client: &reqwest::Client,
+    token: &Token,
+    pr: &GithubPrRef,
+) -> Option<GithubComment> {
+    let endpoint = match pr.comment.as_ref()? {
+        GithubCommentRef::Issue(id) => format!("issues/comments/{id}"),
+        GithubCommentRef::Review(id) => format!("pulls/comments/{id}"),
+    };
+    let response = client
+        .get(format!(
+            "https://api.github.com/repos/{}/{}/{endpoint}",
+            pr.owner, pr.repo
+        ))
+        .bearer_auth(&token.0)
+        .header("User-Agent", "zBase")
+        .header("Accept", "application/vnd.github.text+json")
+        .send()
+        .await
+        .ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    let bytes = response.bytes().await.ok()?;
+    let value: Value = serde_json::from_slice(&bytes).ok()?;
+    parse_comment(&value, pr)
+}
+
+fn parse_comment(value: &Value, pr: &GithubPrRef) -> Option<GithubComment> {
+    // A comment ID is repository-wide: verify it belongs to the linked PR.
+    let linked = GithubPrRef::parse(value.get("html_url")?.as_str()?)?;
+    if &linked != pr {
+        return None;
+    }
+    let body = value
+        .get("body_text")
+        .or_else(|| value.get("body"))?
+        .as_str()?;
+    let mut excerpt: String = body.chars().take(1200).collect();
+    if body.chars().count() > 1200 {
+        excerpt.push('…');
+    }
+    Some(GithubComment {
+        author: value
+            .pointer("/user/login")
+            .and_then(Value::as_str)
+            .unwrap_or("ghost")
+            .to_string(),
+        body: excerpt,
+    })
 }
 
 fn rate_limit_wait(response: &reqwest::Response) -> Option<Duration> {
@@ -622,6 +693,7 @@ fn parse_pr_status(pr: &Value) -> Option<GithubPrStatus> {
     Some(GithubPrStatus {
         title,
         details_loaded: pr.get("reviewThreads").is_some(),
+        comment: None,
         state,
         merged_by,
         additions: count("additions"),
@@ -779,6 +851,7 @@ mod tests {
             owner: "o".into(),
             repo: "r".into(),
             number,
+            comment: None,
         }
     }
 
@@ -786,6 +859,7 @@ mod tests {
         GithubPrStatus {
             title: "t".into(),
             details_loaded: true,
+            comment: None,
             state,
             merged_by: None,
             additions: 0,
@@ -897,6 +971,22 @@ mod tests {
             parse_batch_response(&value, &[pr(1)], Token("t".into()), None),
             FetchOutcome::RateLimited { .. }
         ));
+    }
+
+    #[test]
+    fn comment_preview_matches_target_and_limits_excerpt() {
+        let target = GithubPrRef::parse("https://github.com/o/r/pull/7#issuecomment-42").unwrap();
+        let mut value = json!({
+            "html_url": "https://github.com/o/r/pull/7#issuecomment-42",
+            "user": { "login": "octocat" },
+            "body_text": "é".repeat(1201)
+        });
+        let comment = parse_comment(&value, &target).unwrap();
+        assert_eq!(comment.author, "octocat");
+        assert_eq!(comment.body.chars().count(), 1201);
+        assert!(comment.body.ends_with('…'));
+        value["html_url"] = json!("https://github.com/o/r/pull/8#issuecomment-42");
+        assert!(parse_comment(&value, &target).is_none());
     }
 
     #[test]
@@ -1124,6 +1214,7 @@ mod tests {
             owner: "cameroncooper".into(),
             repo: "zbase".into(),
             number: 44,
+            comment: None,
         };
         let missing = GithubPrRef {
             number: 999_999,

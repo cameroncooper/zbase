@@ -130,6 +130,30 @@ pub fn render_github_pr_preview(preview: &GithubPrPreview) -> Div {
         .child(site_row)
         .child(title_row)
         .child(chips_row)
+        .when_some(
+            status.and_then(|status| status.comment.as_ref()),
+            |card, comment| {
+                card.child(
+                    div()
+                        .mt_1()
+                        .flex()
+                        .flex_col()
+                        .gap_0p5()
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(rgb(text_secondary()))
+                                .child(format!("{} commented", comment.author)),
+                        )
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(rgb(text_primary()))
+                                .child(comment.body.clone()),
+                        ),
+                )
+            },
+        )
 }
 
 fn status_chips(row: Div, status: &GithubPrStatus, refreshing: bool) -> Div {
