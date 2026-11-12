@@ -56,6 +56,7 @@ fn merged_colors() -> (u32, u32) {
 
 /// Callers add the element id, click and hover handlers.
 pub fn render_github_pr_preview(preview: &GithubPrPreview) -> Div {
+    let is_comment = preview.pr.comment.is_some();
     let status = preview.status.as_ref();
     let state = status.map(|status| status.state);
     let (bar_color, icon, icon_color) = match state {
@@ -85,7 +86,7 @@ pub fn render_github_pr_preview(preview: &GithubPrPreview) -> Div {
             preview.pr.repo_label(),
             preview.pr.number
         ))
-        .when_some(state_pill, |row, (label, tone)| {
+        .when_some(state_pill.filter(|_| !is_comment), |row, (label, tone)| {
             row.child(pill(label, tone))
         });
 
@@ -129,7 +130,21 @@ pub fn render_github_pr_preview(preview: &GithubPrPreview) -> Div {
         .gap_0p5()
         .child(site_row)
         .child(title_row)
-        .child(chips_row)
+        .when(!is_comment, |card| card.child(chips_row))
+        .when(
+            is_comment && status.and_then(|status| status.comment.as_ref()).is_none(),
+            |card| {
+                card.child(div().text_xs().text_color(rgb(text_secondary())).child(
+                    if preview.needs_auth {
+                        "Run `gh auth login` to preview this comment"
+                    } else if status.is_some() {
+                        "Comment unavailable"
+                    } else {
+                        "Loading comment…"
+                    },
+                ))
+            },
+        )
         .when_some(
             status.and_then(|status| status.comment.as_ref()),
             |card, comment| {
