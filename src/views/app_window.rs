@@ -1182,7 +1182,8 @@ impl AppWindow {
                 let query_observed_at_remote = query_observed_at;
 
                 // Keep the query in sync, but compute results off the keystroke path.
-                this.models.quick_switcher.query = query.clone();
+                let run_remote_search = query.trim().chars().count() >= QUICK_SWITCHER_REMOTE_MIN_QUERY_CHARS;
+                this.models.quick_switcher.begin_query(query.clone(), run_remote_search);
 
                 if query.trim().is_empty() {
                     this.quick_switcher_last_local_query.clear();
@@ -1200,9 +1201,6 @@ impl AppWindow {
                     cx.notify();
                     return;
                 }
-                let run_remote_search =
-                    query.trim().chars().count() >= QUICK_SWITCHER_REMOTE_MIN_QUERY_CHARS;
-                this.models.quick_switcher.loading_messages = run_remote_search;
                 cx.notify();
 
                 // Debounce local fuzzy results slightly so text input stays responsive.
@@ -1241,13 +1239,7 @@ impl AppWindow {
                                 return;
                             }
                             this.models.quick_switcher.query = query.clone();
-                            this.models.quick_switcher.results = local_output.results;
-                            this.models.quick_switcher.selected_index = this
-                                .models
-                                .quick_switcher
-                                .selected_index
-                                .min(this.models.quick_switcher.results.len().saturating_sub(1));
-                            this.models.quick_switcher.loading_messages = run_remote_search;
+                            this.models.quick_switcher.apply_local_results(local_output.results);
                             this.quick_switcher_last_local_query = query.clone();
                             this.quick_switcher_last_local_matched_entry_indices =
                                 Arc::new(local_output.matched_entry_indices);
@@ -1684,8 +1676,8 @@ impl AppWindow {
                         }
                         let query_seq = quick_switcher_seq_from_query_id(&query_id.0);
                         if self.models.overlay.quick_switcher_open {
-                            self.models.apply_quick_switcher_message_results(results);
-                            self.models.quick_switcher.loading_messages = !*is_complete;
+                            self.models
+                                .apply_quick_switcher_message_results(results, *is_complete);
                             if let Some(query_seq) = query_seq {
                                 if let Some(dispatched_at) = self
                                     .quick_switcher_remote_dispatch_started_at
@@ -1825,8 +1817,8 @@ impl AppWindow {
                     }
                     let query_seq = quick_switcher_seq_from_query_id(&query_id.0);
                     if self.models.overlay.quick_switcher_open {
-                        self.models.apply_quick_switcher_message_results(results);
-                        self.models.quick_switcher.loading_messages = !*is_complete;
+                        self.models
+                            .apply_quick_switcher_message_results(results, *is_complete);
                         if let Some(query_seq) = query_seq {
                             if let Some(dispatched_at) = self
                                 .quick_switcher_remote_dispatch_started_at
@@ -3949,8 +3941,8 @@ impl AppWindow {
                                     == format!("quick-switcher-{}", self.quick_switcher_query_seq)
                             {
                                 let query_seq = quick_switcher_seq_from_query_id(&query_id.0);
-                                self.models.apply_quick_switcher_message_results(results);
-                                self.models.quick_switcher.loading_messages = !*is_complete;
+                                self.models
+                                    .apply_quick_switcher_message_results(results, *is_complete);
                                 if let Some(query_seq) = query_seq {
                                     if let Some(dispatched_at) = self
                                         .quick_switcher_remote_dispatch_started_at
