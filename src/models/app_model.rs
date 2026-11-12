@@ -12,14 +12,16 @@ pub enum Connectivity {
 ///
 /// A send while disconnected is not queued: the adapter can't reach the
 /// Keybase service, the message is marked "Not sent" and keeps a Retry. The
-/// listener reconnects on its own with backoff, so there is nothing for the
-/// user to press; the copy says so instead of offering a "Try again".
+/// listener reconnects on its own, starting the service if needed, for a few
+/// attempts; only once it stops does the banner offer to reconnect.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SendNotice {
     pub banner_title: &'static str,
     pub banner_detail: &'static str,
     /// On the send button, in place of "Send".
     pub send_tooltip: Option<&'static str>,
+    /// The banner's button, which asks the backend to reconnect.
+    pub reconnect_label: Option<&'static str>,
 }
 
 impl Connectivity {
@@ -31,11 +33,13 @@ impl Connectivity {
                 banner_title: "Connecting to Keybase…",
                 banner_detail: "New messages will show up once the connection is back.",
                 send_tooltip: None,
+                reconnect_label: None,
             }),
             Self::Offline => Some(SendNotice {
                 banner_title: "You're offline",
                 banner_detail: "Messages can't be sent until Keybase reconnects.",
                 send_tooltip: Some("Offline · sending fails until Keybase reconnects"),
+                reconnect_label: Some("Reconnect"),
             }),
         }
     }
@@ -82,5 +86,14 @@ mod tests {
             .send_notice()
             .expect("connecting notice");
         assert_eq!(notice.send_tooltip, None);
+    }
+
+    #[test]
+    fn only_offline_offers_to_reconnect() {
+        // While connecting, the backend is already retrying on its own.
+        let connecting = Connectivity::Reconnecting.send_notice().unwrap();
+        assert_eq!(connecting.reconnect_label, None);
+        let offline = Connectivity::Offline.send_notice().unwrap();
+        assert_eq!(offline.reconnect_label, Some("Reconnect"));
     }
 }

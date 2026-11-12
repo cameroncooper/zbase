@@ -128,7 +128,7 @@ impl ConversationView {
                 }
             }))
             .child(ConversationHeader.render(conversation, right_pane, find_in_chat.open, cx))
-            .when_some(connection_banner(connectivity), |container, banner| {
+            .when_some(connection_banner(connectivity, cx), |container, banner| {
                 container.child(banner)
             })
             .when_some(conversation.pinned_message.as_ref(), |container, pinned| {
@@ -811,7 +811,11 @@ fn typing_dot_opacity(delta: f32, index: usize) -> f32 {
 
 /// Strip under the header while Keybase is unreachable: what happened and what it
 /// means for sending, as a warning (amber), not an error. Nothing while connected.
-fn connection_banner(connectivity: &Connectivity) -> Option<AnyElement> {
+/// Once automatic reconnects stop, it offers to reconnect.
+fn connection_banner(
+    connectivity: &Connectivity,
+    cx: &mut Context<AppWindow>,
+) -> Option<AnyElement> {
     let notice = connectivity.send_notice()?;
     let icon = match connectivity {
         Connectivity::Offline => "assets/icons/cloud-off.svg",
@@ -842,6 +846,18 @@ fn connection_banner(connectivity: &Connectivity) -> Option<AnyElement> {
                     .child(notice.banner_title),
             )
             .child(div().flex_1().min_w(px(0.)).child(notice.banner_detail))
+            .when_some(notice.reconnect_label, |banner, label| {
+                banner.child(
+                    div()
+                        .id("conversation-connection-reconnect")
+                        .flex_shrink_0()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .cursor(CursorStyle::PointingHand)
+                        .hover(|style| style.underline())
+                        .on_click(cx.listener(|this, _, _, cx| this.reconnect_accounts(cx)))
+                        .child(label),
+                )
+            })
             .into_any_element(),
     )
 }

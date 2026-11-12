@@ -24,6 +24,8 @@ pub enum UiAction {
     JoinChannel {
         conversation: Box<crate::domain::conversation::ConversationSummary>,
     },
+    /// Retry accounts whose backend stopped reconnecting on its own.
+    ReconnectAccounts,
     LeaveChannel {
         conversation_id: ConversationId,
     },

@@ -181,6 +181,12 @@ impl KeybaseBackend {
             return;
         }
 
+        // A listener that stopped reconnecting is restarted on the same channel:
+        // background tasks still hold its sender.
+        if let Some(sender) = self.inbound_sender.clone() {
+            self.spawn_listener(sender);
+            return;
+        }
         let (sender, receiver) = mpsc::channel();
         self.inbound_events = Some(receiver);
         self.inbound_sender = Some(sender.clone());
@@ -199,6 +205,10 @@ impl KeybaseBackend {
                 }
             });
         }
+        self.spawn_listener(sender);
+    }
+
+    fn spawn_listener(&mut self, sender: Sender<BackendEvent>) {
         let local_store = Arc::clone(&self.local_store);
         let pending_outbox_sends = Arc::clone(&self.pending_outbox_sends);
         let shutdown = Arc::clone(&self.listener_shutdown);
@@ -2029,11 +2039,10 @@ fn run_listener(
     account_id: AccountId,
     shutdown: Arc<AtomicBool>,
 ) {
-    ensure_service_running();
     let runtime = match Builder::new_current_thread().enable_all().build() {
         Ok(runtime) => runtime,
         Err(error) => {
-            let _ = sender.send(BackendEvent::AccountDisconnected {
+            let _ = sender.send(BackendEvent::AccountUnreachable {
                 account_id,
                 reason: error.to_string(),
             });
@@ -2047,8 +2056,13 @@ fn run_listener(
         &account_id,
         &shutdown,
         socket_path,
+        ensure_service_running,
     ));
 }
+
+/// Connection attempts in a row that may fail, each starting the service if it
+/// is not running, before the listener stops and waits for the user to reconnect.
+const MAX_RECONNECT_ATTEMPTS: u32 = 3;
 
 async fn listen_with_reconnect(
     sender: &Sender<BackendEvent>,
@@ -2057,10 +2071,15 @@ async fn listen_with_reconnect(
     account_id: &AccountId,
     shutdown: &AtomicBool,
     resolve_socket: impl Fn() -> Option<PathBuf>,
+    ensure_service: fn() -> bool,
 ) {
     let mut attempt = 0;
+    let mut failures = 0;
     while !shutdown.load(Ordering::Relaxed) {
+        // Starting the service can wait several seconds for its socket.
+        let _ = tokio::task::spawn_blocking(ensure_service).await;
         let started = Instant::now();
+        let mut connected = false;
         let result = match resolve_socket() {
             Some(path) => {
                 run_listener_session(
@@ -2070,6 +2089,7 @@ async fn listen_with_reconnect(
                     pending_outbox_sends,
                     account_id,
                     shutdown,
+                    &mut connected,
                 )
                 .await
             }
@@ -2081,10 +2101,18 @@ async fn listen_with_reconnect(
         if started.elapsed() >= Duration::from_secs(60) {
             attempt = 0;
         }
+        failures = if connected { 0 } else { failures + 1 };
         let reason = result
             .err()
             .map(|error| error.to_string())
             .unwrap_or_else(|| "Keybase notification connection closed".into());
+        if failures >= MAX_RECONNECT_ATTEMPTS {
+            let _ = sender.send(BackendEvent::AccountUnreachable {
+                account_id: account_id.clone(),
+                reason,
+            });
+            break;
+        }
         if sender
             .send(BackendEvent::AccountDisconnected {
                 account_id: account_id.clone(),
@@ -2110,6 +2138,7 @@ async fn run_listener_session(
     pending_outbox_sends: &Arc<Mutex<PendingOutboxSends>>,
     account_id: &AccountId,
     shutdown: &AtomicBool,
+    connected: &mut bool,
 ) -> io::Result<()> {
     let (client, badges, callbacks, notify_sound) =
         tokio::time::timeout(Duration::from_secs(15), async {
@@ -2142,6 +2171,7 @@ async fn run_listener_session(
             account_id: account_id.clone(),
         })
         .map_err(|_| io::Error::other("UI closed"))?;
+    *connected = true;
     // Badge callbacks preceding the snapshot response are superseded by it.
     // Preserve other activity callbacks; their inferred counts cannot overwrite
     // the authoritative snapshot.
@@ -16784,6 +16814,7 @@ mod tests {
                     &account,
                     &shutdown,
                     || Some(socket.clone()),
+                    || true,
                 ),
             )
             .await
@@ -16836,6 +16867,7 @@ mod tests {
                     &Arc::new(Mutex::new(PendingOutboxSends::default())),
                     &AccountId::new("test-account"),
                     &AtomicBool::new(false),
+                    &mut false,
                 )
                 .await;
                 assert!(result.is_err());
@@ -16847,6 +16879,55 @@ mod tests {
                 server.await.unwrap();
             });
         std::fs::remove_file(socket).unwrap();
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn listener_starts_the_service_before_each_attempt_and_stops_after_the_limit() {
+        static SERVICE_STARTS: AtomicU64 = AtomicU64::new(0);
+        let path = temp_emoji_asset_dir("listener-unreachable");
+        std::fs::create_dir_all(&path).unwrap();
+        let store = Arc::new(LocalStore::open_at(path.join("store")).unwrap());
+        let (sender, receiver) = mpsc::channel();
+        Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                tokio::time::timeout(
+                    Duration::from_secs(10),
+                    listen_with_reconnect(
+                        &sender,
+                        &store,
+                        &Arc::new(Mutex::new(PendingOutboxSends::default())),
+                        &AccountId::new("test-account"),
+                        &AtomicBool::new(false),
+                        || Some(path.join("nothing-listens.sock")),
+                        || {
+                            SERVICE_STARTS.fetch_add(1, Ordering::Relaxed);
+                            false
+                        },
+                    ),
+                )
+                .await
+            })
+            .expect("listener stops reconnecting on its own");
+        let events = receiver.try_iter().collect::<Vec<_>>();
+        let disconnected = events
+            .iter()
+            .filter(|event| matches!(event, BackendEvent::AccountDisconnected { .. }))
+            .count();
+        assert_eq!(disconnected as u32, MAX_RECONNECT_ATTEMPTS - 1);
+        assert!(matches!(
+            events.last(),
+            Some(BackendEvent::AccountUnreachable { .. })
+        ));
+        assert_eq!(
+            SERVICE_STARTS.load(Ordering::Relaxed),
+            u64::from(MAX_RECONNECT_ATTEMPTS)
+        );
+        // Windows can't remove the store's files while it is open.
+        drop(store);
         std::fs::remove_dir_all(path).unwrap();
     }
 

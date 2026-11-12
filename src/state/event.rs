@@ -119,6 +119,11 @@ pub enum BackendEvent {
         account_id: crate::domain::backend::AccountId,
         reason: String,
     },
+    /// Reconnecting gave up; nothing retries until the user asks to reconnect.
+    AccountUnreachable {
+        account_id: crate::domain::backend::AccountId,
+        reason: String,
+    },
     BootstrapLoaded {
         source: BootstrapSource,
         account_id: crate::domain::backend::AccountId,

@@ -36,7 +36,10 @@ pub enum BootPhase {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ConnectionState {
     Connected,
+    /// Lost; the backend is reconnecting on its own.
     Disconnected,
+    /// Lost, and the backend stopped reconnecting until the user asks.
+    Unreachable,
 }
 
 #[derive(Clone, Debug)]

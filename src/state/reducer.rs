@@ -73,6 +73,18 @@ fn reduce_ui_action(state: &mut UiState, action: UiAction) -> ReducerOutput {
                 )],
             }
         }
+        UiAction::ReconnectAccounts => {
+            let mut effects = Vec::new();
+            for (account_id, account) in &mut state.backend.accounts {
+                if account.connection_state == ConnectionState::Unreachable {
+                    account.connection_state = ConnectionState::Disconnected;
+                    effects.push(Effect::Backend(BackendCommand::ConnectAccount {
+                        account_id: account_id.clone(),
+                    }));
+                }
+            }
+            ReducerOutput { effects }
+        }
         UiAction::StartApp => {
             state.app.boot_phase = BootPhase::HydratingLocalState;
             ReducerOutput {
@@ -778,6 +790,12 @@ fn reduce_backend_event(state: &mut UiState, event: BackendEvent) -> ReducerOutp
         BackendEvent::AccountDisconnected { account_id, .. } => {
             if let Some(account) = state.backend.accounts.get_mut(&account_id) {
                 account.connection_state = ConnectionState::Disconnected;
+            }
+            state.app.boot_phase = BootPhase::Degraded;
+        }
+        BackendEvent::AccountUnreachable { account_id, .. } => {
+            if let Some(account) = state.backend.accounts.get_mut(&account_id) {
+                account.connection_state = ConnectionState::Unreachable;
             }
             state.app.boot_phase = BootPhase::Degraded;
         }
@@ -3162,6 +3180,59 @@ fn conversation_id_from_route(route: &Route) -> Option<ConversationId> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn reconnect_retries_only_accounts_that_stopped_reconnecting() {
+        use crate::domain::backend::BackendId;
+        use crate::state::state::AccountState;
+        let mut state = UiState::default();
+        for (id, connection_state) in [
+            ("connected", ConnectionState::Connected),
+            ("unreachable", ConnectionState::Unreachable),
+        ] {
+            state.backend.accounts.insert(
+                AccountId::new(id),
+                AccountState {
+                    account_id: AccountId::new(id),
+                    backend_id: BackendId::new("keybase"),
+                    display_name: String::new(),
+                    avatar: None,
+                    connection_state,
+                    capabilities: Default::default(),
+                },
+            );
+        }
+        reduce_backend_event(
+            &mut state,
+            BackendEvent::AccountUnreachable {
+                account_id: AccountId::new("unreachable"),
+                reason: "Keybase service stopped".into(),
+            },
+        );
+        assert_eq!(state.app.boot_phase, BootPhase::Degraded);
+
+        let output = reduce_ui_action(&mut state, UiAction::ReconnectAccounts);
+
+        assert!(matches!(
+            output.effects.as_slice(),
+            [Effect::Backend(BackendCommand::ConnectAccount { account_id })]
+                if account_id.0 == "unreachable"
+        ));
+        assert_eq!(
+            state.backend.accounts[&AccountId::new("unreachable")].connection_state,
+            ConnectionState::Disconnected
+        );
+        assert_eq!(
+            state.backend.accounts[&AccountId::new("connected")].connection_state,
+            ConnectionState::Connected
+        );
+        // Pressing it again while reconnecting does nothing.
+        assert!(
+            reduce_ui_action(&mut state, UiAction::ReconnectAccounts)
+                .effects
+                .is_empty()
+        );
+    }
+
     #[test]
     fn cached_and_refreshed_group_dms_exclude_self_from_shared_title() {
         use crate::domain::backend::BackendId;

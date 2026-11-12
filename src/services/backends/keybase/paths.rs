@@ -86,9 +86,11 @@ fn socket_path_windows() -> Option<PathBuf> {
     Some(PathBuf::from(format!(r"\\.\pipe\kbservice{without_drive}")))
 }
 
-/// Whether the service socket is present. On Windows, opening a pipe to check
-/// would connect to the service, so look it up in the pipe listing instead.
-fn socket_exists(path: &std::path::Path) -> bool {
+/// Whether the service is accepting connections. A service that crashed can
+/// leave its socket file behind, so connect instead of checking the file. On
+/// Windows, opening a pipe to check would connect to the service, so look it up
+/// in the pipe listing instead.
+fn service_reachable(path: &std::path::Path) -> bool {
     #[cfg(target_os = "windows")]
     {
         let Ok(entries) = std::fs::read_dir(r"\\.\pipe\") else {
@@ -101,7 +103,7 @@ fn socket_exists(path: &std::path::Path) -> bool {
     }
     #[cfg(not(target_os = "windows"))]
     {
-        path.exists()
+        std::os::unix::net::UnixStream::connect(path).is_ok()
     }
 }
 
@@ -149,7 +151,7 @@ pub fn ensure_service_running() -> bool {
         return false;
     };
 
-    if socket_exists(&path) {
+    if service_reachable(&path) {
         return true;
     }
 
@@ -166,7 +168,7 @@ pub fn ensure_service_running() -> bool {
     let started = Instant::now();
     while started.elapsed() < SERVICE_START_TIMEOUT {
         thread::sleep(SERVICE_START_POLL_INTERVAL);
-        if socket_exists(&path) {
+        if service_reachable(&path) {
             info!(
                 target: "zbase.service",
                 elapsed_ms = started.elapsed().as_millis(),
@@ -186,6 +188,30 @@ pub fn ensure_service_running() -> bool {
 
 #[cfg(target_os = "macos")]
 fn try_start_service() -> bool {
+    // Quitting Keybase (`keybase ctl stop`) uninstalls the launchd job, which
+    // `launchctl start` cannot bring back; `ctl start` reinstalls and loads it.
+    if let Some(binary) = find_keybase_binary() {
+        info!(target: "zbase.service", binary = %binary.display(), "starting keybase via ctl start");
+        match Command::new(&binary)
+            .args(["ctl", "start", "--include", "service"])
+            .output()
+        {
+            Ok(output) if output.status.success() => return true,
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                warn!(
+                    target: "zbase.service",
+                    exit_code = output.status.code(),
+                    stderr = %stderr.trim(),
+                    "keybase ctl start failed, falling back to launchctl"
+                );
+            }
+            Err(error) => {
+                warn!(target: "zbase.service", %error, "keybase ctl start failed to run, falling back to launchctl");
+            }
+        }
+    }
+
     let label = match run_mode().as_str() {
         "prod" => "keybase.service".to_string(),
         mode => format!("keybase.{mode}.service"),

@@ -3329,7 +3329,7 @@ impl AppWindow {
                 self.refresh(cx);
             }
             DemoScene::Offline => {
-                self.apply_backend_events_inline(vec![BackendEvent::AccountDisconnected {
+                self.apply_backend_events_inline(vec![BackendEvent::AccountUnreachable {
                     account_id: crate::domain::backend::AccountId::new("account_demo_keybase"),
                     reason: "Keybase service stopped".to_string(),
                 }]);
@@ -4090,20 +4090,23 @@ impl AppWindow {
             self.sync_cache.sidebar_sections_sig = None;
         }
 
-        self.models.app.connectivity = if snapshot
-            .backend
-            .accounts
-            .values()
-            .any(|account| matches!(account.connection_state, ConnectionState::Connected))
-        {
+        let any_account_in = |state: ConnectionState| {
+            snapshot
+                .backend
+                .accounts
+                .values()
+                .any(|account| account.connection_state == state)
+        };
+        // A disconnected account is still being reconnected by its backend; it is
+        // offline only once that stops.
+        self.models.app.connectivity = if any_account_in(ConnectionState::Connected) {
             Connectivity::Online
-        } else if matches!(
-            snapshot.app.boot_phase,
-            BootPhase::Launching | BootPhase::HydratingLocalState | BootPhase::ConnectingBackend
-        ) {
-            Connectivity::Reconnecting
-        } else {
+        } else if any_account_in(ConnectionState::Unreachable)
+            || snapshot.app.boot_phase == BootPhase::FatalError
+        {
             Connectivity::Offline
+        } else {
+            Connectivity::Reconnecting
         };
         self.models.sidebar.filter = snapshot.sidebar.filter.clone();
         self.models.search.query = snapshot.search.query.clone();
@@ -6035,6 +6038,12 @@ impl AppWindow {
                 }
             })
             .detach();
+    }
+
+    /// The offline banner's Reconnect: restart accounts whose backend gave up.
+    pub(crate) fn reconnect_accounts(&mut self, cx: &mut Context<Self>) {
+        self.dispatch_ui_action(UiAction::ReconnectAccounts);
+        self.refresh(cx);
     }
 
     pub(crate) fn toggle_pane(
