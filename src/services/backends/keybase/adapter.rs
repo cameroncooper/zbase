@@ -2677,6 +2677,9 @@ fn run_bootstrap(
     ));
 
     let left_snapshot = local_store.left_conversation_snapshot().unwrap_or_default();
+    let unconfirmed_channels = local_store
+        .unconfirmed_channel_snapshot()
+        .unwrap_or_default();
     let account_for_bootstrap = account_id.clone();
     let backend_for_bootstrap = backend_id.clone();
     let result = runtime.block_on(async move {
@@ -2718,6 +2721,22 @@ fn run_bootstrap(
                         conversation_id,
                     });
                 }
+            }
+            // The cache cannot tell a channel left elsewhere from a joined one, so it
+            // would keep its stale unread count. An empty inbox is not trusted for this.
+            if !(payload.channels.is_empty() && payload.direct_messages.is_empty())
+                && let Err(error) = local_store.retire_departed_channels(
+                    &unconfirmed_channels,
+                    payload.channels.iter().map(|summary| summary.id.clone()),
+                    |conversation_id| {
+                        let _ = sender.send(BackendEvent::ChannelLeft {
+                            workspace_id: WorkspaceId::new(WORKSPACE_ID),
+                            conversation_id: conversation_id.clone(),
+                        });
+                    },
+                )
+            {
+                tracing::warn!("Could not retire channels missing from the inbox: {error}");
             }
             let crawl_refs = payload
                 .conversation_bindings
