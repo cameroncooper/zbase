@@ -9,7 +9,8 @@ use crate::views::input::{
 };
 #[cfg(target_os = "macos")]
 use crate::views::input::{
-    DeleteToBeginningOfLine, DeleteToEndOfLine, MoveToBeginningOfLine, MoveToEndOfLine,
+    DeleteToBeginningOfLine, DeleteToEndOfLine, DeleteToEndOfParagraph, DeleteWordForward,
+    MoveToBeginningOfLine, MoveToBeginningOfParagraph, MoveToEndOfLine, MoveToEndOfParagraph,
     SelectToBeginningOfLine, SelectToEndOfLine, ShowCharacterPalette,
 };
 use gpui_kit::{App, KeyBinding};
@@ -343,6 +344,11 @@ pub fn install(cx: &mut App) {
         KeyBinding::new("ctrl-a", MoveToBeginningOfLine, Some("TextField")),
         KeyBinding::new("ctrl-e", MoveToEndOfLine, Some("TextField")),
         KeyBinding::new("ctrl-d", Delete, Some("TextField")),
+        KeyBinding::new("alt-delete", DeleteWordForward, Some("TextField")),
+        KeyBinding::new("cmd-up", Home, Some("TextField")),
+        KeyBinding::new("cmd-down", End, Some("TextField")),
+        KeyBinding::new("cmd-shift-up", SelectHome, Some("TextField")),
+        KeyBinding::new("cmd-shift-down", SelectEnd, Some("TextField")),
         KeyBinding::new("ctrl-cmd-space", ShowCharacterPalette, Some("TextField")),
         KeyBinding::new(
             "alt-backspace",
@@ -355,7 +361,7 @@ pub fn install(cx: &mut App) {
             Some("MultilineTextField"),
         ),
         KeyBinding::new("cmd-delete", DeleteToEndOfLine, Some("MultilineTextField")),
-        KeyBinding::new("ctrl-k", DeleteToEndOfLine, Some("MultilineTextField")),
+        KeyBinding::new("ctrl-k", DeleteToEndOfParagraph, Some("MultilineTextField")),
         KeyBinding::new("ctrl-h", Backspace, Some("MultilineTextField")),
         KeyBinding::new("ctrl-b", Left, Some("MultilineTextField")),
         KeyBinding::new("ctrl-f", Right, Some("MultilineTextField")),
@@ -394,9 +400,18 @@ pub fn install(cx: &mut App) {
             Some("MultilineTextField"),
         ),
         KeyBinding::new("ctrl-/", Undo, Some("MultilineTextField")),
-        KeyBinding::new("ctrl-a", MoveToBeginningOfLine, Some("MultilineTextField")),
-        KeyBinding::new("ctrl-e", MoveToEndOfLine, Some("MultilineTextField")),
+        KeyBinding::new(
+            "ctrl-a",
+            MoveToBeginningOfParagraph,
+            Some("MultilineTextField"),
+        ),
+        KeyBinding::new("ctrl-e", MoveToEndOfParagraph, Some("MultilineTextField")),
         KeyBinding::new("ctrl-d", Delete, Some("MultilineTextField")),
+        KeyBinding::new("alt-delete", DeleteWordForward, Some("MultilineTextField")),
+        KeyBinding::new("cmd-up", Home, Some("MultilineTextField")),
+        KeyBinding::new("cmd-down", End, Some("MultilineTextField")),
+        KeyBinding::new("cmd-shift-up", SelectHome, Some("MultilineTextField")),
+        KeyBinding::new("cmd-shift-down", SelectEnd, Some("MultilineTextField")),
         KeyBinding::new(
             "ctrl-cmd-space",
             ShowCharacterPalette,

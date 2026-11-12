@@ -118,6 +118,7 @@ actions!(
     [
         Backspace,
         DeleteWordBackward,
+        DeleteWordForward,
         MoveToPreviousWordStart,
         MoveToNextWordEnd,
         Delete,
@@ -134,6 +135,8 @@ actions!(
         SelectAll,
         MoveToBeginningOfLine,
         MoveToEndOfLine,
+        MoveToBeginningOfParagraph,
+        MoveToEndOfParagraph,
         Home,
         End,
         SelectToBeginningOfLine,
@@ -142,6 +145,7 @@ actions!(
         SelectEnd,
         DeleteToBeginningOfLine,
         DeleteToEndOfLine,
+        DeleteToEndOfParagraph,
         InsertNewline,
         ShowCharacterPalette,
         Paste,
@@ -214,6 +218,13 @@ pub struct TextField {
     scroll_to_cursor: bool,
     selection_pointer: Option<Point<Pixels>>,
     selection_scroll_task: Option<gpui_kit::Task<()>>,
+    /// Where Up and Down aim across lines, so a short line on the way doesn't
+    /// pull the cursor left. Kept only while they are what moved the cursor.
+    vertical_goal: Option<VerticalGoal>,
+    /// The cursor sits where a long line wraps and belongs to the start of the
+    /// row below, not the end of the row above: Up, Down or a click put it
+    /// there. Where a line wraps, both are the same text offset.
+    cursor_on_lower_row: Option<CursorMark>,
     pub pasted_image: Option<Vec<u8>>,
     last_content_height: Pixels,
     undo_stack: VecDeque<UndoEntry>,
@@ -309,6 +320,8 @@ impl TextField {
             scroll_to_cursor: true,
             selection_pointer: None,
             selection_scroll_task: None,
+            vertical_goal: None,
+            cursor_on_lower_row: None,
             pasted_image: None,
             last_content_height: px(0.),
             undo_stack: VecDeque::new(),
@@ -615,10 +628,44 @@ impl TextField {
         } else {
             self.selected_range.start
         };
-        self.move_to(current_line_start(&self.content, offset), cx);
+        let start = self.row_start(offset);
+        self.move_to(start, cx);
+        self.keep_row_start_affinity(start);
     }
 
     fn move_to_end_of_line(&mut self, _: &MoveToEndOfLine, _: &mut Window, cx: &mut Context<Self>) {
+        let offset = if self.selected_range.is_empty() {
+            self.cursor_offset()
+        } else {
+            self.selected_range.end
+        };
+        let end = self.row_end(offset);
+        self.move_to(end, cx);
+        self.cursor_on_lower_row = None;
+    }
+
+    /// Ctrl+A: the start of the line, across the rows it wraps onto.
+    fn move_to_beginning_of_paragraph(
+        &mut self,
+        _: &MoveToBeginningOfParagraph,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let offset = if self.selected_range.is_empty() {
+            self.cursor_offset()
+        } else {
+            self.selected_range.start
+        };
+        self.move_to(current_line_start(&self.content, offset), cx);
+    }
+
+    /// Ctrl+E: the end of the line, across the rows it wraps onto.
+    fn move_to_end_of_paragraph(
+        &mut self,
+        _: &MoveToEndOfParagraph,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let offset = if self.selected_range.is_empty() {
             self.cursor_offset()
         } else {
@@ -649,7 +696,9 @@ impl TextField {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.select_to(current_line_start(&self.content, self.cursor_offset()), cx);
+        let start = self.row_start(self.cursor_offset());
+        self.select_to(start, cx);
+        self.keep_row_start_affinity(start);
     }
 
     fn select_to_end_of_line(
@@ -658,7 +707,9 @@ impl TextField {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.select_to(current_line_end(&self.content, self.cursor_offset()), cx);
+        let end = self.row_end(self.cursor_offset());
+        self.select_to(end, cx);
+        self.cursor_on_lower_row = None;
     }
 
     fn insert_newline(&mut self, _: &InsertNewline, window: &mut Window, cx: &mut Context<Self>) {
@@ -670,6 +721,18 @@ impl TextField {
     fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
         if self.selected_range.is_empty() {
             self.select_to(self.previous_boundary(self.cursor_offset()), cx);
+        }
+        self.replace_text_in_range(None, "", window, cx);
+    }
+
+    fn delete_word_forward(
+        &mut self,
+        _: &DeleteWordForward,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.selected_range.is_empty() {
+            self.select_to(next_word_end(&self.content, self.cursor_offset()), cx);
         }
         self.replace_text_in_range(None, "", window, cx);
     }
@@ -696,7 +759,7 @@ impl TextField {
         cx: &mut Context<Self>,
     ) {
         if self.selected_range.is_empty() {
-            self.select_to(current_line_start(&self.content, self.cursor_offset()), cx);
+            self.select_to(self.row_start(self.cursor_offset()), cx);
         }
         self.replace_text_in_range(None, "", window, cx);
     }
@@ -711,6 +774,19 @@ impl TextField {
     fn delete_to_end_of_line(
         &mut self,
         _: &DeleteToEndOfLine,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.selected_range.is_empty() {
+            self.select_to(self.row_end(self.cursor_offset()), cx);
+        }
+        self.replace_text_in_range(None, "", window, cx);
+    }
+
+    /// Ctrl+K: delete to the end of the line, across the rows it wraps onto.
+    fn delete_to_end_of_paragraph(
+        &mut self,
+        _: &DeleteToEndOfParagraph,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -747,6 +823,13 @@ impl TextField {
             self.select_to(offset, cx);
         } else {
             self.move_to(offset, cx);
+            // Where a line wraps, a click at the start of the lower row is the
+            // same offset as the end of the row above; keep the row clicked.
+            let on_lower_row = self
+                .local_mouse_position(event.position)
+                .zip(self.last_layout.as_ref())
+                .is_some_and(|(position, layout)| layout.is_on_lower_row(offset, position.y));
+            self.cursor_on_lower_row = on_lower_row.then(|| self.cursor_mark());
         }
     }
 
@@ -837,6 +920,7 @@ impl TextField {
     }
 
     fn move_to(&mut self, offset: usize, cx: &mut Context<Self>) {
+        self.forget_cursor_marks_unless_at(offset);
         self.scroll_to_cursor = true;
         self.selected_range = offset..offset;
         self.selection_reversed = false;
@@ -844,28 +928,96 @@ impl TextField {
     }
 
     fn move_vertical(&mut self, direction: f32, cx: &mut Context<Self>) {
-        if let Some(next) = self.vertical_target_offset(direction) {
-            self.move_to(next, cx);
+        if let Some(target) = self.vertical_target(direction) {
+            self.move_to(target.offset, cx);
+            self.keep_vertical_target(target);
         }
     }
 
     fn select_vertical(&mut self, direction: f32, cx: &mut Context<Self>) {
-        if let Some(next) = self.vertical_target_offset(direction) {
-            self.select_to(next, cx);
+        if let Some(target) = self.vertical_target(direction) {
+            self.select_to(target.offset, cx);
+            self.keep_vertical_target(target);
         }
     }
 
-    fn vertical_target_offset(&self, direction: f32) -> Option<usize> {
+    /// Where the cursor goes one row up (`direction` -1) or down (1). Above the
+    /// first row is the start of the text, below the last its end.
+    fn vertical_target(&self, direction: f32) -> Option<VerticalTarget> {
         if !self.is_multiline() {
             return None;
         }
         let layout = self.last_layout.as_ref()?;
-        let cursor = self.cursor_offset();
-        let position = layout.position_for_index(cursor)?;
-        Some(layout.closest_index_for_position(point(
-            position.x,
-            (position.y + layout.line_height * direction).max(px(0.)),
-        )))
+        let position =
+            layout.cursor_position(self.cursor_offset(), self.cursor_is_on_lower_row())?;
+        let x = self
+            .vertical_goal
+            .filter(|goal| goal.at == self.cursor_mark())
+            .map_or(position.x, |goal| goal.x);
+        // `position` is the top of the cursor's row. Aim at the middle of the
+        // next one: its top edge belongs to the row above.
+        let y = position.y + layout.line_height * (direction + 0.5);
+        let offset = layout.closest_index_for_position(point(x, y));
+        Some(VerticalTarget {
+            offset,
+            x,
+            on_lower_row: layout.is_on_lower_row(offset, y),
+        })
+    }
+
+    fn keep_vertical_target(&mut self, target: VerticalTarget) {
+        let at = self.cursor_mark();
+        self.vertical_goal = Some(VerticalGoal { at, x: target.x });
+        self.cursor_on_lower_row = target.on_lower_row.then_some(at);
+    }
+
+    /// The start of the visible row holding `offset`: where a long line wraps,
+    /// one row of it, as Cmd+Left does on macOS.
+    fn row_start(&self, offset: usize) -> usize {
+        self.row_range(offset).map_or_else(
+            || current_line_start(&self.content, offset),
+            |row| row.start,
+        )
+    }
+
+    /// The end of the visible row holding `offset`, as Cmd+Right does.
+    fn row_end(&self, offset: usize) -> usize {
+        self.row_range(offset)
+            .map_or_else(|| current_line_end(&self.content, offset), |row| row.end)
+    }
+
+    fn row_range(&self, offset: usize) -> Option<Range<usize>> {
+        let on_lower_row = offset == self.cursor_offset() && self.cursor_is_on_lower_row();
+        self.last_layout.as_ref()?.row_range(offset, on_lower_row)
+    }
+
+    /// A row's start where a line wraps is also the end of the row above;
+    /// keep the cursor on the row it was moved to the start of.
+    fn keep_row_start_affinity(&mut self, start: usize) {
+        let wraps_here = self
+            .last_layout
+            .as_ref()
+            .is_some_and(|layout| layout.lower_row_position(start).is_some());
+        self.cursor_on_lower_row = wraps_here.then(|| self.cursor_mark());
+    }
+
+    fn cursor_mark(&self) -> CursorMark {
+        CursorMark {
+            offset: self.cursor_offset(),
+            text_len: self.content.len(),
+        }
+    }
+
+    fn cursor_is_on_lower_row(&self) -> bool {
+        self.cursor_on_lower_row == Some(self.cursor_mark())
+    }
+
+    /// Moving the cursor elsewhere makes the remembered column and row stale.
+    fn forget_cursor_marks_unless_at(&mut self, offset: usize) {
+        if offset != self.cursor_offset() {
+            self.vertical_goal = None;
+            self.cursor_on_lower_row = None;
+        }
     }
 
     pub fn selected_range(&self) -> Range<usize> {
@@ -891,6 +1043,25 @@ impl TextField {
         cx.notify();
     }
 
+    /// Where the caret is drawn, in the text's own coordinates.
+    #[cfg(test)]
+    pub(crate) fn caret_position(&self) -> Option<(Point<Pixels>, Pixels)> {
+        let layout = self.last_layout.as_ref()?;
+        let position =
+            layout.cursor_position(self.cursor_offset(), self.cursor_is_on_lower_row())?;
+        Some((position, layout.line_height))
+    }
+
+    /// A point in the text's own coordinates, in window coordinates.
+    #[cfg(test)]
+    pub(crate) fn window_point(&self, local: Point<Pixels>) -> Option<Point<Pixels>> {
+        let bounds = self.last_bounds.as_ref()?;
+        Some(point(
+            bounds.origin.x + local.x,
+            bounds.origin.y + local.y - self.scroll_y,
+        ))
+    }
+
     pub fn cursor_offset(&self) -> usize {
         if self.selection_reversed {
             self.selected_range.start
@@ -903,20 +1074,26 @@ impl TextField {
         if self.content.is_empty() {
             return 0;
         }
-
-        let (Some(bounds), Some(layout)) = (self.last_bounds.as_ref(), self.last_layout.as_ref())
-        else {
+        let (Some(local_position), Some(layout)) = (
+            self.local_mouse_position(position),
+            self.last_layout.as_ref(),
+        ) else {
             return 0;
         };
-
-        let local_position = point(
-            position.x - bounds.origin.x,
-            position.y - bounds.origin.y + self.scroll_y,
-        );
         layout.closest_index_for_position(local_position)
     }
 
+    /// `position` in the text's own coordinates, scrolling included.
+    fn local_mouse_position(&self, position: Point<Pixels>) -> Option<Point<Pixels>> {
+        let bounds = self.last_bounds.as_ref()?;
+        Some(point(
+            position.x - bounds.origin.x,
+            position.y - bounds.origin.y + self.scroll_y,
+        ))
+    }
+
     fn select_to(&mut self, offset: usize, cx: &mut Context<Self>) {
+        self.forget_cursor_marks_unless_at(offset);
         self.scroll_to_cursor = true;
         if self.selection_reversed {
             self.selected_range.start = offset;
@@ -1317,6 +1494,7 @@ impl Element for TextLineElement {
         let content = input.content.clone();
         let selected_range = input.selected_range.clone();
         let cursor = input.cursor_offset();
+        let cursor_on_lower_row = input.cursor_is_on_lower_row();
         let style = window.text_style();
 
         let (display_text, text_color, is_placeholder) = if content.is_empty() {
@@ -1424,6 +1602,7 @@ impl Element for TextLineElement {
                 input.scroll_y,
                 bounds.size.height,
                 cursor,
+                cursor_on_lower_row,
                 input.scroll_to_cursor,
             )
         } else {
@@ -1438,7 +1617,9 @@ impl Element for TextLineElement {
         };
 
         let cursor = if caret_visible && selection.is_empty() {
-            let cursor_pos = layout.position_for_index(cursor).unwrap_or_default();
+            let cursor_pos = layout
+                .cursor_position(cursor, cursor_on_lower_row)
+                .unwrap_or_default();
             // A little shorter than the line, centered on it, like a native caret.
             let inset = px(CARET_VERTICAL_INSET_PX);
             Some(fill(
@@ -1596,6 +1777,7 @@ impl Render for TextField {
             .cursor(CursorStyle::IBeam)
             .on_action(cx.listener(Self::backspace))
             .on_action(cx.listener(Self::delete_word_backward))
+            .on_action(cx.listener(Self::delete_word_forward))
             .on_action(cx.listener(Self::move_to_previous_word_start))
             .on_action(cx.listener(Self::move_to_next_word_end))
             .on_action(cx.listener(Self::delete))
@@ -1612,6 +1794,8 @@ impl Render for TextField {
             .on_action(cx.listener(Self::select_all))
             .on_action(cx.listener(Self::move_to_beginning_of_line))
             .on_action(cx.listener(Self::move_to_end_of_line))
+            .on_action(cx.listener(Self::move_to_beginning_of_paragraph))
+            .on_action(cx.listener(Self::move_to_end_of_paragraph))
             .on_action(cx.listener(Self::home))
             .on_action(cx.listener(Self::end))
             .on_action(cx.listener(Self::select_to_beginning_of_line))
@@ -1620,6 +1804,7 @@ impl Render for TextField {
             .on_action(cx.listener(Self::select_end))
             .on_action(cx.listener(Self::delete_to_beginning_of_line))
             .on_action(cx.listener(Self::delete_to_end_of_line))
+            .on_action(cx.listener(Self::delete_to_end_of_paragraph))
             .on_action(cx.listener(Self::insert_newline))
             .on_action(cx.listener(Self::show_character_palette))
             .on_action(cx.listener(Self::paste))
@@ -1640,6 +1825,29 @@ impl Focusable for TextField {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus_handle.clone()
     }
+}
+
+/// The cursor offset and text length something about the cursor was learned
+/// at; once either changes, it no longer applies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct CursorMark {
+    offset: usize,
+    text_len: usize,
+}
+
+/// See `TextField::vertical_goal`.
+#[derive(Clone, Copy, Debug)]
+struct VerticalGoal {
+    at: CursorMark,
+    x: Pixels,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct VerticalTarget {
+    offset: usize,
+    /// The x it aimed at, kept as the column for the next Up or Down.
+    x: Pixels,
+    on_lower_row: bool,
 }
 
 #[derive(Clone)]
@@ -1732,6 +1940,67 @@ impl TextLayoutSnapshot {
         }
 
         self.text_len
+    }
+
+    /// Where the cursor is drawn and measured from: at a wrap, the start of
+    /// the lower row when it belongs there, else the end of the upper one.
+    fn cursor_position(&self, index: usize, on_lower_row: bool) -> Option<Point<Pixels>> {
+        on_lower_row
+            .then(|| self.lower_row_position(index))
+            .flatten()
+            .or_else(|| self.position_for_index(index))
+    }
+
+    /// Whether `index`, where a line wraps, reads as the start of the row
+    /// below rather than the end of the row above, for a point at height `y`.
+    fn is_on_lower_row(&self, index: usize, y: Pixels) -> bool {
+        self.lower_row_position(index)
+            .is_some_and(|row_start| y >= row_start.y)
+    }
+
+    /// The visible row holding `index`, as text offsets. Where a line wraps,
+    /// `index` is the end of the upper row unless `on_lower_row`.
+    fn row_range(&self, index: usize, on_lower_row: bool) -> Option<Range<usize>> {
+        let mut line_start_ix = 0;
+        for line in &self.lines {
+            let line_end_ix = line_start_ix + line.len();
+            if index > line_end_ix {
+                line_start_ix = self.next_line_start(line_start_ix, line.len());
+                continue;
+            }
+            let local_index = index.checked_sub(line_start_ix)?;
+            let mut row_start = 0;
+            for row_end in wrap_points(line).chain([line.len()]) {
+                let wraps_here = row_end < line.len();
+                if local_index < row_end
+                    || (local_index == row_end && !(wraps_here && on_lower_row))
+                {
+                    return Some(line_start_ix + row_start..line_start_ix + row_end);
+                }
+                row_start = row_end;
+            }
+            return Some(line_start_ix + row_start..line_end_ix);
+        }
+        None
+    }
+
+    /// The start of the row below the wrap at `index`; `None` when no line
+    /// wraps there.
+    fn lower_row_position(&self, index: usize) -> Option<Point<Pixels>> {
+        let mut line_origin_y = px(0.);
+        let mut line_start_ix = 0;
+        for line in &self.lines {
+            let line_end_ix = line_start_ix + line.len();
+            if index > line_end_ix {
+                line_origin_y += line.size(self.line_height).height;
+                line_start_ix = self.next_line_start(line_start_ix, line.len());
+                continue;
+            }
+            let local_index = index.checked_sub(line_start_ix)?;
+            let row = wrap_points(line).position(|wrap| wrap == local_index)? + 1;
+            return Some(point(px(0.), line_origin_y + self.line_height * row as f32));
+        }
+        None
     }
 
     fn position_for_index(&self, index: usize) -> Option<Point<Pixels>> {
@@ -1860,6 +2129,7 @@ fn visible_scroll_offset(
     current_scroll_y: Pixels,
     visible_height: Pixels,
     cursor: usize,
+    cursor_on_lower_row: bool,
     follow_cursor: bool,
 ) -> Pixels {
     if layout.is_placeholder {
@@ -1869,7 +2139,9 @@ fn visible_scroll_offset(
         current_scroll_y,
         layout.total_height(),
         visible_height,
-        layout.position_for_index(cursor).map(|point| point.y),
+        layout
+            .cursor_position(cursor, cursor_on_lower_row)
+            .map(|point| point.y),
         layout.line_height,
         follow_cursor,
     )
@@ -2002,6 +2274,13 @@ struct VisualLineSegment {
     width: Pixels,
 }
 
+/// Offsets within `line` where it wraps onto a new row.
+fn wrap_points(line: &WrappedLine) -> impl Iterator<Item = usize> + '_ {
+    line.wrap_boundaries()
+        .iter()
+        .map(|boundary| line.runs()[boundary.run_ix].glyphs[boundary.glyph_ix].index)
+}
+
 fn visual_segments(
     line: &WrappedLine,
     global_line_start: usize,
@@ -2010,14 +2289,7 @@ fn visual_segments(
     let mut segments = Vec::new();
     let mut segment_start = 0;
     let mut top = px(0.);
-    let mut boundaries = line
-        .wrap_boundaries()
-        .iter()
-        .map(|boundary| {
-            let run = &line.runs()[boundary.run_ix];
-            run.glyphs[boundary.glyph_ix].index
-        })
-        .collect::<Vec<_>>();
+    let mut boundaries = wrap_points(line).collect::<Vec<_>>();
     boundaries.push(line.len());
 
     for boundary in boundaries {

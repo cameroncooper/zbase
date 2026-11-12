@@ -102,6 +102,269 @@ fn custom_composer_keeps_unicode_input_and_focus_through_redraw(cx: &mut TestApp
     .unwrap();
 }
 
+#[gpui_kit::test]
+fn composer_up_and_down_move_one_line_at_a_time(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        crate::app::key_bindings::install(cx);
+    });
+    let (window, view) = cx.update(|cx| {
+        gpui_kit::open_window(Default::default(), cx, |window, cx| {
+            let input = cx
+                .new(|cx| TextField::new_auto_grow(cx.focus_handle(), "Message", String::new(), 8));
+            window.focus(&input.focus_handle(cx), cx);
+            cx.new(|_| InputFixture(input))
+        })
+        .unwrap()
+    });
+    cx.update_window(window, |_, window, cx| {
+        let input = view.read(cx).0.clone();
+        let set = |text: &str, at: usize, window: &mut gpui_kit::Window, cx: &mut gpui_kit::App| {
+            input.update(cx, |input, cx| {
+                input.replace_all_and_select(text.into(), at..at, cx)
+            });
+            window.render_frame(cx);
+        };
+        let press = |key: &str, window: &mut gpui_kit::Window, cx: &mut gpui_kit::App| {
+            window.press(key, cx);
+            window.render_frame(cx);
+            input.read(cx).cursor_offset()
+        };
+
+        // A fenced draft: lines 0..3, 4..26 and 27..30.
+        let draft = "```\nlet total = a + b + c;\n```";
+        set(draft, draft.len(), window, cx);
+        assert_eq!(
+            press("down", window, cx),
+            30,
+            "Down on the last line keeps the end"
+        );
+        assert!(
+            (5..=26).contains(&press("up", window, cx)),
+            "Up reaches line 2"
+        );
+        assert_eq!(
+            press("down", window, cx),
+            30,
+            "Down returns to the last line"
+        );
+        set(draft, 0, window, cx);
+        assert_eq!(press("down", window, cx), 4, "Down reaches line 2");
+        assert_eq!(press("down", window, cx), 27, "Down reaches line 3");
+        assert_eq!(press("up", window, cx), 4);
+        assert_eq!(press("up", window, cx), 0);
+        assert_eq!(
+            press("up", window, cx),
+            0,
+            "Up on the first line stays at the start"
+        );
+
+        // Passing a short line, the cursor returns to the column it started at.
+        let lines = "The quick brown fox jumps\nHi\nThe quick brown fox jumps";
+        set(lines, 15, window, cx);
+        assert_eq!(press("down", window, cx), 28);
+        assert_eq!(press("down", window, cx), 29 + 15);
+        assert_eq!(press("up", window, cx), 28);
+        assert_eq!(press("up", window, cx), 15);
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn composer_moves_row_by_row_through_wrapped_lines(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        crate::app::key_bindings::install(cx);
+    });
+    let (window, view) = cx.update(|cx| {
+        gpui_kit::open_window(Default::default(), cx, |window, cx| {
+            let input = cx
+                .new(|cx| TextField::new_auto_grow(cx.focus_handle(), "Message", String::new(), 8));
+            window.focus(&input.focus_handle(cx), cx);
+            cx.new(|_| InputFixture(input))
+        })
+        .unwrap()
+    });
+    cx.update_window(window, |_, window, cx| {
+        let input = view.read(cx).0.clone();
+        let paragraph = "The quick brown fox jumps over the lazy dog while five boxing wizards \
+            jump quickly. Pack my box with five dozen liquor jugs, then sphinx of black \
+            quartz, judge my vow and keep on typing a little longer.";
+        let draft = format!("```\n{paragraph}\n```");
+        let last_line = draft.len() - 3;
+        input.update(cx, |input, cx| {
+            input.replace_all_and_select(draft.clone(), 0..0, cx)
+        });
+        window.render_frame(cx);
+        let caret = |cx: &mut gpui_kit::App| input.read(cx).caret_position().unwrap();
+        let press = |key: &str, window: &mut gpui_kit::Window, cx: &mut gpui_kit::App| {
+            window.press(key, cx);
+            window.render_frame(cx);
+            (input.read(cx).cursor_offset(), caret(cx).0)
+        };
+
+        // Down visits every row once, each at its start, until the closing fence.
+        let (top, line_height) = caret(cx);
+        let mut rows = vec![(0, top)];
+        while rows.last().unwrap().0 != last_line {
+            assert!(rows.len() < 20, "Down stalled at {:?}", rows.last());
+            let (offset, position) = press("down", window, cx);
+            let (_, above) = *rows.last().unwrap();
+            assert_eq!(position.y, above.y + line_height, "one row lower: {rows:?}");
+            assert_eq!(position.x, top.x, "at the row's start: {rows:?}");
+            rows.push((offset, position));
+        }
+        assert!(
+            rows.len() >= 5,
+            "the paragraph wraps onto several rows: {rows:?}"
+        );
+
+        // Up retraces them.
+        for &(offset, position) in rows.iter().rev().skip(1) {
+            assert_eq!(press("up", window, cx), (offset, position));
+        }
+
+        // A click at the start of a wrapped row puts the caret there, not at the
+        // end of the row above, which is the same offset.
+        let (wrap, row_start) = rows[2];
+        let click = |local: gpui_kit::Point<gpui_kit::Pixels>,
+                     window: &mut gpui_kit::Window,
+                     cx: &mut gpui_kit::App| {
+            let position = input.read(cx).window_point(local).unwrap();
+            for event in [
+                gpui_kit::MouseDownEvent {
+                    button: gpui_kit::MouseButton::Left,
+                    position,
+                    click_count: 1,
+                    ..Default::default()
+                }
+                .to_platform_input(),
+                gpui_kit::MouseUpEvent {
+                    button: gpui_kit::MouseButton::Left,
+                    position,
+                    click_count: 1,
+                    ..Default::default()
+                }
+                .to_platform_input(),
+            ] {
+                window.dispatch_event(event, cx);
+            }
+            window.render_frame(cx);
+            (input.read(cx).cursor_offset(), caret(cx).0)
+        };
+        let mid_row = gpui_kit::point(
+            row_start.x + gpui_kit::px(1.),
+            row_start.y + line_height / 2.,
+        );
+        assert_eq!(click(mid_row, window, cx), (wrap, row_start));
+        // Past the end of the row above, the caret stays on that row. The
+        // fixture's text is 288px wide; its rows wrap before the edge.
+        let past_end = gpui_kit::point(gpui_kit::px(287.), row_start.y - line_height / 2.);
+        let (offset, position) = click(past_end, window, cx);
+        assert_eq!(offset, wrap);
+        assert_eq!(position.y, row_start.y - line_height);
+    })
+    .unwrap();
+}
+
+/// Cmd and Option shortcuts for moving and deleting, in a wrapped paragraph.
+#[cfg(target_os = "macos")]
+#[gpui_kit::test]
+fn composer_line_keys_act_on_the_visible_row(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        crate::app::key_bindings::install(cx);
+    });
+    let (window, view) = cx.update(|cx| {
+        gpui_kit::open_window(Default::default(), cx, |window, cx| {
+            let input = cx
+                .new(|cx| TextField::new_auto_grow(cx.focus_handle(), "Message", String::new(), 8));
+            window.focus(&input.focus_handle(cx), cx);
+            cx.new(|_| InputFixture(input))
+        })
+        .unwrap()
+    });
+    cx.update_window(window, |_, window, cx| {
+        let input = view.read(cx).0.clone();
+        let paragraph = "The quick brown fox jumps over the lazy dog while five boxing wizards \
+            jump quickly. Pack my box with five dozen liquor jugs, then sphinx of black \
+            quartz, judge my vow and keep on typing a little longer.";
+        let draft = format!("```\n{paragraph}\n```");
+        let paragraph_end = draft.len() - 4;
+        let set = |text: &str, at: usize, window: &mut gpui_kit::Window, cx: &mut gpui_kit::App| {
+            input.update(cx, |input, cx| {
+                input.replace_all_and_select(text.into(), at..at, cx)
+            });
+            window.render_frame(cx);
+        };
+        let press = |key: &str, window: &mut gpui_kit::Window, cx: &mut gpui_kit::App| {
+            window.press(key, cx);
+            window.render_frame(cx);
+            let input = input.read(cx);
+            (input.selected_range(), input.caret_position().unwrap().0)
+        };
+        let text = |cx: &mut gpui_kit::App| input.read(cx).text().to_string();
+
+        // Find the paragraph's second row: Down from its start lands on it.
+        set(&draft, 4, window, cx);
+        let (second_row, row_start) = press("down", window, cx);
+        let row = second_row.start;
+        let (third_row, _) = press("down", window, cx);
+        let row_end = third_row.start;
+        assert!(4 < row && row < row_end && row_end < paragraph_end);
+        let inside = row + 3;
+
+        // Home and End: the row's start and end, drawn on that row.
+        set(&draft, inside, window, cx);
+        assert_eq!(press("cmd-left", window, cx), (row..row, row_start));
+        let (range, end_caret) = press("cmd-right", window, cx);
+        assert_eq!(range, row_end..row_end, "End after Home stays on the row");
+        assert_eq!(end_caret.y, row_start.y);
+        assert!(end_caret.x > row_start.x);
+        set(&draft, inside, window, cx);
+        assert_eq!(press("cmd-shift-left", window, cx).0, row..inside);
+        set(&draft, inside, window, cx);
+        assert_eq!(press("cmd-shift-right", window, cx).0, inside..row_end);
+
+        // Deleting to the row's edges stays on the row.
+        set(&draft, inside, window, cx);
+        press("cmd-backspace", window, cx);
+        assert_eq!(text(cx), format!("{}{}", &draft[..row], &draft[inside..]));
+        set(&draft, inside, window, cx);
+        press("cmd-delete", window, cx);
+        assert_eq!(
+            text(cx),
+            format!("{}{}", &draft[..inside], &draft[row_end..])
+        );
+
+        // Ctrl+A, Ctrl+E and Ctrl+K keep acting on the whole paragraph.
+        set(&draft, inside, window, cx);
+        assert_eq!(press("ctrl-a", window, cx).0, 4..4);
+        assert_eq!(press("ctrl-e", window, cx).0, paragraph_end..paragraph_end);
+        set(&draft, inside, window, cx);
+        press("ctrl-k", window, cx);
+        assert_eq!(
+            text(cx),
+            format!("{}{}", &draft[..inside], &draft[paragraph_end..])
+        );
+
+        // Cmd+Up and Cmd+Down: the start and end of the message.
+        set(&draft, inside, window, cx);
+        assert_eq!(press("cmd-up", window, cx).0, 0..0);
+        assert_eq!(press("cmd-down", window, cx).0, draft.len()..draft.len());
+        set(&draft, inside, window, cx);
+        assert_eq!(press("cmd-shift-down", window, cx).0, inside..draft.len());
+        set(&draft, inside, window, cx);
+        assert_eq!(press("cmd-shift-up", window, cx).0, 0..inside);
+
+        // Option+Delete deletes the next word.
+        set("alpha beta gamma", 6, window, cx);
+        press("alt-delete", window, cx);
+        assert_eq!(text(cx), "alpha  gamma");
+    })
+    .unwrap();
+}
+
 #[cfg(target_os = "macos")]
 mod sidebar_bounce {
     use super::*;
