@@ -1527,6 +1527,16 @@ impl TimelineList {
                                     .items_center()
                                     .justify_center()
                                     .child(plus_icon(text_secondary()))
+                                    // The window's click-away clears hover on
+                                    // mouse down, which would unmount this tile
+                                    // before the click lands.
+                                    .on_mouse_down(
+                                        gpui_kit::MouseButton::Left,
+                                        cx.listener(|this, _, _, cx| {
+                                            this.cancel_hover_clear();
+                                            cx.stop_propagation();
+                                        }),
+                                    )
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         this.clear_hovered_message_immediate(cx);
                                         this.react_to_message(message_id_for_add.clone(), cx);
