@@ -131,6 +131,69 @@ fn fuzzy_match_prepared_inner(
     }
 }
 
+/// Find an alternate subsequence made entirely of word prefixes. The usual
+/// greedy/tightened paths can miss this when an interior match scores higher.
+pub(crate) fn fuzzy_match_word_prefixes_prepared(
+    query: &PreparedFuzzyQuery,
+    candidate: &PreparedFuzzyCandidate,
+) -> Option<FuzzyMatch> {
+    let starts: Vec<usize> = (0..candidate.chars.len())
+        .filter(|&index| is_boundary(&candidate.chars, index))
+        .collect();
+    let mut failed = std::collections::HashSet::new();
+    let indices = word_prefix_indices(&query.chars, &candidate.chars, &starts, 0, 0, &mut failed)?;
+    let ranges = to_ranges(&candidate.chars, &indices);
+    Some(FuzzyMatch {
+        score: score_match(&candidate.chars, &indices, &ranges),
+        ranges,
+    })
+}
+
+fn word_prefix_indices(
+    query: &[char],
+    candidate: &[CandidateChar],
+    starts: &[usize],
+    word: usize,
+    consumed: usize,
+    failed: &mut std::collections::HashSet<(usize, usize)>,
+) -> Option<Vec<usize>> {
+    if consumed == query.len() {
+        return Some(Vec::new());
+    }
+    if word == starts.len() || failed.contains(&(word, consumed)) {
+        return None;
+    }
+    let start = starts[word];
+    let common = query[consumed..]
+        .iter()
+        .zip(&candidate[start..])
+        .take_while(|(needle, ch)| **needle == ch.lower)
+        .count();
+    // Try longer prefixes first, while retaining shorter alternatives for a
+    // later word. Memoized failures keep ambiguous initials from exploding.
+    for length in (1..=common).rev() {
+        let next_word = starts.partition_point(|index| *index < start + length);
+        if let Some(tail) = word_prefix_indices(
+            query,
+            candidate,
+            starts,
+            next_word,
+            consumed + length,
+            failed,
+        ) {
+            let mut indices: Vec<usize> = (start..start + length).collect();
+            indices.extend(tail);
+            return Some(indices);
+        }
+    }
+    if let Some(indices) = word_prefix_indices(query, candidate, starts, word + 1, consumed, failed)
+    {
+        return Some(indices);
+    }
+    failed.insert((word, consumed));
+    None
+}
+
 fn word_match_prepared(
     query: &PreparedFuzzyQuery,
     candidate: &PreparedFuzzyCandidate,
@@ -210,15 +273,7 @@ fn word_match_prepared(
 }
 
 fn is_boundary_char_index(chars: &[CandidateChar], char_index: usize) -> bool {
-    if char_index == 0 {
-        return true;
-    }
-    let previous = chars[char_index - 1].lower;
-    previous.is_whitespace()
-        || matches!(
-            previous,
-            '-' | '_' | '#' | '>' | '.' | '/' | '\\' | ':' | ',' | '(' | ')'
-        )
+    is_boundary(chars, char_index)
 }
 
 fn greedy_match_indices(pattern: &[char], candidate: &[CandidateChar]) -> Option<Vec<usize>> {
@@ -310,13 +365,21 @@ fn score_match(
 }
 
 fn is_boundary(chars: &[CandidateChar], index: usize) -> bool {
-    if index == 0 {
-        return true;
-    }
-    let previous = chars[index - 1].lower;
-    previous.is_whitespace()
+    index == 0 || is_word_separator(chars[index - 1].lower)
+}
+
+pub(crate) fn is_word_boundary(text: &str, start: usize) -> bool {
+    start == 0
+        || text[..start]
+            .chars()
+            .next_back()
+            .is_some_and(is_word_separator)
+}
+
+fn is_word_separator(ch: char) -> bool {
+    ch.is_whitespace()
         || matches!(
-            previous,
+            ch,
             '-' | '_' | '#' | '>' | '.' | '/' | '\\' | ':' | ',' | '(' | ')'
         )
 }
@@ -349,6 +412,37 @@ fn to_ranges(chars: &[CandidateChar], matched_indices: &[usize]) -> Vec<(usize, 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn boundary_prefix_alternative_preserves_abbreviations_and_utf8_offsets() {
+        for (query, text) in [
+            ("helale", "Helper Bot, Alice Example, Alex Example"),
+            ("abra", "Ab, Abra"),
+            ("éa", "éclair, Alice"),
+        ] {
+            let candidate = super::prepare_fuzzy_candidate(text);
+            let query_prepared = super::prepare_fuzzy_query(query).unwrap();
+            let matched =
+                super::fuzzy_match_word_prefixes_prepared(&query_prepared, &candidate).unwrap();
+            let letters: String = matched
+                .ranges
+                .iter()
+                .map(|&(start, end)| &text[start..end])
+                .collect();
+            assert_eq!(letters.to_ascii_lowercase(), query);
+            for &(start, _) in &matched.ranges {
+                let index = candidate
+                    .chars
+                    .iter()
+                    .position(|ch| ch.start == start)
+                    .unwrap();
+                assert!(super::is_boundary(&candidate.chars, index));
+            }
+        }
+        let query = super::prepare_fuzzy_query("awesome").unwrap();
+        let candidate = super::prepare_fuzzy_candidate("Alice W Examples, Owen Sample, Casey Test");
+        assert!(super::fuzzy_match_word_prefixes_prepared(&query, &candidate).is_none());
+    }
+
     #[test]
     fn multiword_matches_use_utf8_offsets_and_skip_to_character_boundaries() {
         for (query, candidate, expected) in [

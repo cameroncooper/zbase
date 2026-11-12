@@ -46,8 +46,6 @@ pub(crate) const OVERLAY_TOP_PX: f32 = 96.;
 const QUICK_SWITCHER_RENDER_LIMIT_UNREAD: usize = 14;
 const QUICK_SWITCHER_RENDER_LIMIT_RECENT: usize = 14;
 const QUICK_SWITCHER_RECENT_SHORTCUT_LIMIT: usize = 5;
-const QUICK_SWITCHER_RENDER_LIMIT_CONVERSATIONS: usize = 3;
-const QUICK_SWITCHER_RENDER_LIMIT_MESSAGES: usize = 10;
 
 #[derive(Default)]
 pub struct OverlayHost;
@@ -584,8 +582,7 @@ impl OverlayHost {
         let query_empty = quick_switcher.query.trim().is_empty();
         let mut unread_indices = Vec::new();
         let mut recent_indices = Vec::new();
-        let mut conversation_indices = Vec::new();
-        let mut message_indices = Vec::new();
+        let sections = quick_switcher.search_sections();
         for (index, result) in quick_switcher.results.iter().enumerate() {
             if query_empty {
                 if result.kind == QuickSwitcherResultKind::UnreadChannel
@@ -600,20 +597,6 @@ impl OverlayHost {
 
                 if unread_indices.len() >= QUICK_SWITCHER_RENDER_LIMIT_UNREAD
                     && recent_indices.len() >= QUICK_SWITCHER_RENDER_LIMIT_RECENT
-                {
-                    break;
-                }
-            } else {
-                if result.kind == QuickSwitcherResultKind::Message {
-                    if message_indices.len() < QUICK_SWITCHER_RENDER_LIMIT_MESSAGES {
-                        message_indices.push(index);
-                    }
-                } else if conversation_indices.len() < QUICK_SWITCHER_RENDER_LIMIT_CONVERSATIONS {
-                    conversation_indices.push(index);
-                }
-
-                if conversation_indices.len() >= QUICK_SWITCHER_RENDER_LIMIT_CONVERSATIONS
-                    && message_indices.len() >= QUICK_SWITCHER_RENDER_LIMIT_MESSAGES
                 {
                     break;
                 }
@@ -645,10 +628,10 @@ impl OverlayHost {
                 ));
             }
         } else {
-            if !conversation_indices.is_empty() {
+            if !sections.strong.is_empty() {
                 results = results.child(Self::quick_switcher_section(
                     "Channels and people",
-                    &conversation_indices,
+                    &sections.strong,
                     quick_switcher,
                     false,
                     hits,
@@ -656,10 +639,21 @@ impl OverlayHost {
                     cx,
                 ));
             }
-            if !message_indices.is_empty() {
+            if !sections.messages.is_empty() {
                 results = results.child(Self::quick_switcher_section(
                     "Messages",
-                    &message_indices,
+                    &sections.messages,
+                    quick_switcher,
+                    false,
+                    hits,
+                    conversation_avatars,
+                    cx,
+                ));
+            }
+            if !sections.weak.is_empty() {
+                results = results.child(Self::quick_switcher_section(
+                    "Other channels and people",
+                    &sections.weak,
                     quick_switcher,
                     false,
                     hits,
@@ -891,6 +885,29 @@ impl OverlayHost {
                 FontWeight::NORMAL,
             ));
         }
+        let group_username_match = result
+            .username_match
+            .as_ref()
+            .filter(|matched| matched.group);
+        if let Some(username_match) = result
+            .username_match
+            .as_ref()
+            .filter(|matched| !matched.group)
+        {
+            segments.push(Segment {
+                text: "  ".to_string(),
+                color: secondary_color,
+                weight: FontWeight::NORMAL,
+            });
+            segments.extend(highlight_segments(
+                &username_match.text,
+                &username_match.ranges,
+                secondary_color,
+                match_color,
+                FontWeight::NORMAL,
+            ));
+        }
+        let expanded = is_message || group_username_match.is_some();
 
         let icon = Self::quick_switcher_icon(
             result,
@@ -914,11 +931,11 @@ impl OverlayHost {
             .w_full()
             .min_h(px(36.))
             .px_2()
-            .when(is_message, |row| row.py(px(6.)))
+            .when(expanded, |row| row.py(px(6.)))
             .rounded(px(6.))
             .flex()
-            .when(is_message, |row| row.items_start())
-            .when(!is_message, |row| row.items_center())
+            .when(expanded, |row| row.items_start())
+            .when(!expanded, |row| row.items_center())
             .gap(px(10.))
             .text_size(typography::font_px(14.))
             .bg(row_surface)
@@ -936,7 +953,7 @@ impl OverlayHost {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .when(is_message, |icon| icon.mt(px(1.)))
+                    .when(expanded, |icon| icon.mt(px(1.)))
                     .child(icon),
             )
             .child(
@@ -953,6 +970,27 @@ impl OverlayHost {
                             .line_height(typography::font_px(if is_message { 16. } else { 20. }))
                             .child(TruncatedLine::new(segments)),
                     )
+                    .when_some(group_username_match, |column, username_match| {
+                        let mut segments = vec![Segment {
+                            text: "Matched ".to_string(),
+                            color: secondary_color,
+                            weight: FontWeight::NORMAL,
+                        }];
+                        segments.extend(highlight_segments(
+                            &username_match.text,
+                            &username_match.ranges,
+                            secondary_color,
+                            match_color,
+                            FontWeight::NORMAL,
+                        ));
+                        column.child(
+                            div()
+                                .w_full()
+                                .text_size(px(12.))
+                                .line_height(px(16.))
+                                .child(TruncatedLine::new(segments)),
+                        )
+                    })
                     .when_some(snippet, |column, snippet| {
                         column.child(snippet_text(&snippet, SWITCHER_HIT, false))
                     }),

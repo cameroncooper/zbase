@@ -13,7 +13,10 @@ pub mod new_chat_model;
 pub mod notifications_model;
 pub mod overlay_model;
 pub mod profile_panel_model;
+mod quick_switcher_matching;
 pub mod quick_switcher_model;
+#[cfg(test)]
+mod quick_switcher_tests;
 pub mod recent_sidebar;
 pub mod search_model;
 pub mod settings_model;
@@ -43,10 +46,7 @@ use crate::domain::{
 use crate::util::{
     deep_link::parse_keybase_chat_link,
     formatting::now_unix_ms,
-    fuzzy::{
-        FuzzyMatch, PreparedFuzzyCandidate, PreparedFuzzyQuery, fuzzy_match, fuzzy_match_prepared,
-        prepare_fuzzy_candidate, prepare_fuzzy_query,
-    },
+    fuzzy::{fuzzy_match, fuzzy_match_prepared, prepare_fuzzy_candidate, prepare_fuzzy_query},
 };
 
 use self::{
@@ -67,6 +67,11 @@ use self::{
         FullscreenImageOverlay, OverlayModel, ReactionHoverTooltip, SidebarHoverTooltip,
     },
     profile_panel_model::ProfilePanelModel,
+    quick_switcher_matching::{
+        QuickSwitcherMatchCandidate, quick_switcher_channel_match_candidates,
+        quick_switcher_dm_display_names, quick_switcher_dm_match_candidates,
+        quick_switcher_dm_usernames, quick_switcher_match_for_candidates_prepared,
+    },
     quick_switcher_model::{QuickSwitcherModel, QuickSwitcherResult, QuickSwitcherResultKind},
     search_model::SearchModel,
     settings_model::{Density, SettingsModel, ThemeMode},
@@ -82,13 +87,6 @@ const QUICK_SWITCHER_RECENT_LIMIT: usize = 10;
 const QUICK_SWITCHER_AFFINITY_HALF_LIFE_MS: f32 = 14.0 * 24.0 * 60.0 * 60.0 * 1000.0;
 const QUICK_SWITCHER_AFFINITY_BOOST_SCALE: f32 = 35.0;
 const QUICK_SWITCHER_AFFINITY_MAX_BOOST: i32 = 120;
-
-#[derive(Clone, Debug)]
-pub(crate) struct QuickSwitcherMatchCandidate {
-    pub(crate) text: String,
-    pub(crate) highlightable: bool,
-    pub(crate) prepared: PreparedFuzzyCandidate,
-}
 
 #[derive(Clone, Debug)]
 pub(crate) struct QuickSwitcherSearchEntry {
@@ -561,6 +559,7 @@ impl AppModels {
     pub fn update_quick_switcher_query(&mut self, query: String) {
         let _ = self.flush_quick_switcher_local_search_corpus_if_dirty();
         self.quick_switcher.query = query;
+        self.quick_switcher.selection_is_explicit = false;
         self.quick_switcher.results.clear();
         self.quick_switcher.selected_index = 0;
         self.quick_switcher.loading_messages = false;
@@ -602,6 +601,8 @@ impl AppModels {
                     conversation_id: summary.id,
                     message_id: None,
                     match_ranges: Vec::new(),
+                    username_match: None,
+                    strong_navigation_match: false,
                     author_id: None,
                     timestamp_ms: None,
                 });
@@ -635,6 +636,8 @@ impl AppModels {
                     conversation_id: summary.id.clone(),
                     message_id: None,
                     match_ranges: Vec::new(),
+                    username_match: None,
+                    strong_navigation_match: false,
                     author_id: None,
                     timestamp_ms: None,
                 });
@@ -666,6 +669,8 @@ impl AppModels {
                         conversation_id: summary.id.clone(),
                         message_id: None,
                         match_ranges: Vec::new(),
+                        username_match: None,
+                        strong_navigation_match: false,
                         author_id: None,
                         timestamp_ms: None,
                     });
@@ -720,6 +725,8 @@ impl AppModels {
                         conversation_id: summary.id.clone(),
                         message_id: None,
                         match_ranges: Vec::new(),
+                        username_match: None,
+                        strong_navigation_match: false,
                         author_id: None,
                         timestamp_ms: None,
                     });
@@ -739,12 +746,26 @@ impl AppModels {
             Some(&self.settings.quick_switcher_affinity),
             now_unix_ms(),
         );
-        self.quick_switcher.results = local.results;
+        self.quick_switcher.apply_local_results(local.results);
     }
 
     pub fn move_quick_switcher_selection(&mut self, direction: isize) {
         if self.quick_switcher.results.is_empty() {
             self.quick_switcher.selected_index = 0;
+            return;
+        }
+        self.quick_switcher.selection_is_explicit = true;
+        if !self.quick_switcher.query.trim().is_empty() {
+            let indices = self.quick_switcher.search_sections().indices();
+            if indices.is_empty() {
+                return;
+            }
+            let current = indices
+                .iter()
+                .position(|index| *index == self.quick_switcher.selected_index)
+                .unwrap_or(0);
+            let next = (current as isize + direction).clamp(0, indices.len() as isize - 1) as usize;
+            self.quick_switcher.selected_index = indices[next];
             return;
         }
         let current = self.quick_switcher.selected_index as isize;
@@ -782,16 +803,17 @@ impl AppModels {
             .insert(key, (decayed_affinity + 1.0, now_ms));
     }
 
-    pub fn apply_quick_switcher_message_results(&mut self, results: &[SearchResult]) {
+    pub fn apply_quick_switcher_message_results(
+        &mut self,
+        results: &[SearchResult],
+        is_complete: bool,
+    ) {
         const QUICK_SWITCHER_MESSAGE_LIMIT: usize = 14;
         let active_conversation_id = quick_switcher_active_conversation_id(
             &self.navigation.current,
             &self.workspace.channels,
             &self.workspace.direct_messages,
         );
-        self.quick_switcher
-            .results
-            .retain(|result| result.kind != QuickSwitcherResultKind::Message);
         let mut seen = HashSet::new();
         let mut in_active_conversation = Vec::new();
         let mut outside_active_conversation = Vec::new();
@@ -814,9 +836,9 @@ impl AppModels {
             .take(QUICK_SWITCHER_MESSAGE_LIMIT)
             .collect::<Vec<_>>();
         kept.sort_by(|left, right| left.cmp_for_display(right));
-        self.quick_switcher
-            .results
-            .extend(kept.into_iter().map(|result| QuickSwitcherResult {
+        let results = kept
+            .into_iter()
+            .map(|result| QuickSwitcherResult {
                 label: quick_switcher_message_label(
                     &result.conversation_id,
                     &self.workspace.channels,
@@ -829,18 +851,14 @@ impl AppModels {
                 conversation_id: result.conversation_id.clone(),
                 message_id: Some(result.message.id.clone()),
                 match_ranges: result.snippet_highlight_ranges.clone(),
+                username_match: None,
+                strong_navigation_match: false,
                 author_id: Some(result.message.author_id.clone()),
                 timestamp_ms: result.message.timestamp_ms,
-            }));
-        if self.quick_switcher.results.is_empty() {
-            self.quick_switcher.selected_index = 0;
-        } else {
-            self.quick_switcher.selected_index = self
-                .quick_switcher
-                .selected_index
-                .min(self.quick_switcher.results.len().saturating_sub(1));
-        }
-        self.quick_switcher.loading_messages = false;
+            })
+            .collect();
+        self.quick_switcher
+            .apply_message_results(results, is_complete);
     }
 
     pub fn resolve_deep_link(&self, deep_link: &str) -> Option<(Route, MessageId)> {
@@ -2361,180 +2379,8 @@ fn quick_switcher_label_for_summary(
     }
 }
 
-fn quick_switcher_match_for_dm(
-    query: &str,
-    raw_title: &str,
-    display_label: &str,
-    profile_names: &HashMap<String, String>,
-) -> Option<FuzzyMatch> {
-    let candidates = quick_switcher_dm_match_candidates(raw_title, display_label, profile_names);
-    let prepared_query = prepare_fuzzy_query(query)?;
-    let mut rejected = 0usize;
-    let mut fuzzy_evaluated = 0usize;
-    quick_switcher_match_for_candidates_prepared(
-        &prepared_query,
-        &candidates,
-        &mut rejected,
-        &mut fuzzy_evaluated,
-    )
-}
-
-fn quick_switcher_match_candidate(
-    text: String,
-    highlightable: bool,
-) -> QuickSwitcherMatchCandidate {
-    let prepared = prepare_fuzzy_candidate(&text);
-    QuickSwitcherMatchCandidate {
-        text,
-        highlightable,
-        prepared,
-    }
-}
-
-fn quick_switcher_dm_match_candidates(
-    raw_title: &str,
-    display_label: &str,
-    profile_names: &HashMap<String, String>,
-) -> Vec<QuickSwitcherMatchCandidate> {
-    let usernames = quick_switcher_dm_usernames(raw_title);
-    if usernames.is_empty() {
-        return vec![quick_switcher_match_candidate(
-            display_label.to_string(),
-            true,
-        )];
-    }
-    let display_names = quick_switcher_dm_display_names(&usernames, profile_names);
-    // Full names stay searchable when people are shown by username.
-    let full_names = usernames
-        .iter()
-        .map(|username| {
-            profile_names
-                .get(&username.to_ascii_lowercase())
-                .cloned()
-                .unwrap_or_else(|| username.clone())
-        })
-        .collect::<Vec<_>>();
-    let username_label = usernames.join(", ");
-    let mut candidates = Vec::new();
-    candidates.push(quick_switcher_match_candidate(
-        display_label.to_string(),
-        true,
-    ));
-    if username_label != display_label {
-        candidates.push(quick_switcher_match_candidate(username_label, false));
-    }
-    candidates.extend(
-        quick_switcher_permutation_labels(&display_names)
-            .into_iter()
-            .map(|text| quick_switcher_match_candidate(text, false)),
-    );
-    candidates.extend(
-        quick_switcher_permutation_labels(&usernames)
-            .into_iter()
-            .map(|text| quick_switcher_match_candidate(text, false)),
-    );
-    if full_names != display_names {
-        candidates.push(quick_switcher_match_candidate(full_names.join(", "), false));
-        candidates.extend(
-            quick_switcher_permutation_labels(&full_names)
-                .into_iter()
-                .map(|text| quick_switcher_match_candidate(text, false)),
-        );
-    }
-    dedupe_quick_switcher_match_candidates(candidates)
-}
-
-fn dedupe_quick_switcher_match_candidates(
-    candidates: Vec<QuickSwitcherMatchCandidate>,
-) -> Vec<QuickSwitcherMatchCandidate> {
-    let mut seen = HashSet::new();
-    let mut deduped = Vec::new();
-    for candidate in candidates {
-        if seen.insert(candidate.text.clone()) {
-            deduped.push(candidate);
-        }
-    }
-    deduped
-}
-
-fn quick_switcher_match_for_candidates_prepared(
-    query: &PreparedFuzzyQuery,
-    candidates: &[QuickSwitcherMatchCandidate],
-    rejected_candidates: &mut usize,
-    fuzzy_evaluated: &mut usize,
-) -> Option<FuzzyMatch> {
-    let mut best: Option<FuzzyMatch> = None;
-    for candidate in candidates {
-        if candidate.prepared.char_len < query.char_len {
-            *rejected_candidates = rejected_candidates.saturating_add(1);
-            continue;
-        }
-        if query.char_mask & !candidate.prepared.char_mask != 0 {
-            *rejected_candidates = rejected_candidates.saturating_add(1);
-            continue;
-        }
-        *fuzzy_evaluated = fuzzy_evaluated.saturating_add(1);
-        let Some(mut matched) = fuzzy_match_prepared(query, &candidate.prepared) else {
-            continue;
-        };
-        if !candidate.highlightable {
-            matched.ranges.clear();
-        }
-        match best.as_ref() {
-            Some(existing) if existing.score >= matched.score => {}
-            _ => best = Some(matched),
-        }
-    }
-    best
-}
-
-fn quick_switcher_dm_usernames(raw_title: &str) -> Vec<String> {
-    raw_title
-        .split(',')
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .collect()
-}
-
 fn quick_switcher_dm_participant_count(raw_title: &str) -> usize {
     quick_switcher_dm_usernames(raw_title).len().max(1)
-}
-
-fn quick_switcher_dm_display_names(
-    usernames: &[String],
-    profile_names: &HashMap<String, String>,
-) -> Vec<String> {
-    usernames
-        .iter()
-        .map(|username| {
-            let full_name = profile_names
-                .get(&username.to_ascii_lowercase())
-                .map_or("", String::as_str);
-            crate::domain::user::shown_name(username, full_name).to_string()
-        })
-        .collect()
-}
-
-fn quick_switcher_permutation_labels(parts: &[String]) -> Vec<String> {
-    if parts.len() <= 1 {
-        return Vec::new();
-    }
-    let original = parts.join(", ");
-    let mut labels = Vec::new();
-    let mut reversed = parts.to_vec();
-    reversed.reverse();
-    let reversed_label = reversed.join(", ");
-    if reversed_label != original {
-        labels.push(reversed_label);
-    }
-    let mut sorted = parts.to_vec();
-    sorted.sort_by_key(|value| value.to_ascii_lowercase());
-    let sorted_label = sorted.join(", ");
-    if sorted_label != original && !labels.contains(&sorted_label) {
-        labels.push(sorted_label);
-    }
-    labels
 }
 
 fn quick_switcher_sublabel_for_summary(summary: &ConversationSummary) -> Option<String> {
@@ -2636,7 +2482,7 @@ fn build_quick_switcher_search_corpus(
             unread_count: summary.unread_count,
             mention_count: summary.mention_count,
             dm_participant_count: None,
-            match_candidates: vec![quick_switcher_match_candidate(label, true)],
+            match_candidates: quick_switcher_channel_match_candidates(summary, &label),
         };
         channel_entry_indices.push(entries.len());
         entries.push(entry);
@@ -2828,7 +2674,7 @@ pub(crate) fn compute_quick_switcher_local_results(
     affinity_by_conversation_id: Option<&HashMap<String, (f32, i64)>>,
     now_ms: i64,
 ) -> QuickSwitcherLocalSearchOutput {
-    let trimmed = query.trim();
+    let trimmed = query.trim().strip_prefix('#').unwrap_or(query.trim());
     if trimmed.is_empty() {
         return QuickSwitcherLocalSearchOutput::default();
     }
@@ -2837,6 +2683,9 @@ pub(crate) fn compute_quick_switcher_local_results(
     };
 
     let previous_trimmed = previous_query.map(str::trim).unwrap_or_default();
+    let previous_trimmed = previous_trimmed
+        .strip_prefix('#')
+        .unwrap_or(previous_trimmed);
     let use_incremental_narrowing = !previous_trimmed.is_empty()
         && trimmed.starts_with(previous_trimmed)
         && previous_corpus_revision == Some(corpus.revision)
@@ -2895,7 +2744,12 @@ pub(crate) fn compute_quick_switcher_local_results(
         ) else {
             return;
         };
+        // Keep text matches in the incremental pool even when today's quality
+        // gate rejects them: extending the query may yield different fragments.
         matched_entry_indices.push(entry_idx);
+        if !matched.eligible {
+            return;
+        }
         let unread_boost = if entry.unread_count > 0 { 50 } else { 0 };
         let mention_boost = if entry.mention_count > 0 { 70 } else { 0 };
         let participant_penalty = entry
@@ -2911,8 +2765,8 @@ pub(crate) fn compute_quick_switcher_local_results(
         } else {
             0
         };
-        let score =
-            matched.score + unread_boost + mention_boost + affinity_boost - participant_penalty;
+        let score = matched.matched.score + unread_boost + mention_boost + affinity_boost
+            - participant_penalty;
         let scored = (
             score,
             entry.dm_participant_count,
@@ -2924,7 +2778,9 @@ pub(crate) fn compute_quick_switcher_local_results(
                 route: entry.route.clone(),
                 conversation_id: entry.conversation_id.clone(),
                 message_id: None,
-                match_ranges: matched.ranges,
+                match_ranges: matched.matched.ranges,
+                username_match: matched.username_match,
+                strong_navigation_match: matched.strong,
                 author_id: None,
                 timestamp_ms: None,
             },
@@ -3239,21 +3095,6 @@ mod tests {
         assert_eq!(demo.conversation.summary.title, "design");
         let live = AppModels::empty_with_settings(SettingsModel::default());
         assert_empty_conversation_content(&live);
-    }
-
-    #[test]
-    fn quick_switcher_dm_match_supports_name_reordering() {
-        let mut profile_names = HashMap::new();
-        profile_names.insert("alex".to_string(), "Alex Example".to_string());
-        profile_names.insert("helperbot".to_string(), "Helper Bot".to_string());
-
-        let matched = quick_switcher_match_for_dm(
-            "alhel",
-            "helperbot, alex",
-            "Helper Bot, Alex Example",
-            &profile_names,
-        );
-        assert!(matched.is_some(), "expected reordered DM match");
     }
 
     #[test]
