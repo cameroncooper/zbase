@@ -118,6 +118,10 @@ pub enum BackendEvent {
         offset: usize,
         result: Result<crate::domain::bots::FeaturedBotPage, String>,
     },
+    BotsInvalidated {
+        team_id: Option<String>,
+        except: Option<ConversationId>,
+    },
     BotsResult {
         conversation_id: ConversationId,
         request: u64,

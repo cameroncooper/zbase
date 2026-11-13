@@ -20,6 +20,7 @@ pub(super) struct BotForm {
     username: Entity<TextField>,
     triggers: Entity<TextField>,
     settings: BotSettings,
+    restricted: bool,
     mode: FormMode,
     featured: Option<crate::domain::bots::FeaturedBot>,
     pending: Option<u64>,
@@ -187,6 +188,7 @@ impl AppWindow {
             username,
             triggers,
             settings,
+            restricted: bot.as_ref().is_none_or(|b| b.restricted),
             mode: if remove {
                 FormMode::Remove
             } else if bot.is_some() {
@@ -265,11 +267,22 @@ impl AppWindow {
         }
         let operation = match mode {
             FormMode::Add if !verified => BotOperation::Lookup { username },
-            FormMode::Add => BotOperation::Add { username, settings },
-            FormMode::Edit => BotOperation::Save { username, settings },
+            FormMode::Add => BotOperation::Add {
+                username,
+                settings,
+                restricted: form.restricted,
+            },
+            FormMode::Edit => BotOperation::Save {
+                username,
+                settings,
+                restricted: form.restricted,
+            },
             FormMode::Remove => BotOperation::Remove { username },
         };
         let mutation = !matches!(operation, BotOperation::Lookup { .. });
+        if mutation && !state.snapshot.can_manage {
+            return;
+        }
         if let Some(form) = self.bot_ui.form.as_mut() {
             form.show_lookup = true;
         }
@@ -323,10 +336,21 @@ impl AppWindow {
             result: Ok(BotResult::Loaded(snapshot)),
         }]);
         self.models.set_right_pane(RightPaneMode::Bots);
-        self.bot_ui.selected =
-            matches!(scene, DemoScene::BotDetails | DemoScene::BotAccess).then(|| "zoombot".into());
-        if matches!(scene, DemoScene::BotAccess | DemoScene::BotRemove) {
+        self.bot_ui.selected = matches!(
+            scene,
+            DemoScene::BotDetails | DemoScene::BotAccess | DemoScene::BotUnrestricted
+        )
+        .then(|| "zoombot".into());
+        if matches!(
+            scene,
+            DemoScene::BotAccess | DemoScene::BotUnrestricted | DemoScene::BotRemove
+        ) {
             self.begin_bot_form(Some(bot), scene == DemoScene::BotRemove, window, cx);
+        }
+        if scene == DemoScene::BotUnrestricted
+            && let Some(form) = self.bot_ui.form.as_mut()
+        {
+            form.restricted = false;
         }
         if matches!(scene, DemoScene::BotAdd | DemoScene::BotAddReview) {
             self.begin_bot_form(None, false, window, cx);

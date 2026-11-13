@@ -121,140 +121,195 @@ impl AppWindow {
                     )));
                 }
             }
-            let is_channel = self.models.conversation.summary.kind == ConversationKind::Channel;
-            let scope_summary = if !is_channel {
-                "Allowed in this conversation only.".to_string()
-            } else if form.settings.conversations.is_empty() {
-                "Allowed in all team channels.".to_string()
-            } else if form.settings.conversations == vec![raw_id(&form.conversation)] {
-                format!("Allowed in {destination} only.")
-            } else {
-                format!(
-                    "Allowed in {} selected channels.",
-                    form.settings.conversations.len()
-                )
-            };
-            body = body
-                .child(note(scope_summary))
-                .child(section_label("Messages this bot can receive"))
-                .child(option(
-                    "bot-commands",
-                    "Commands",
-                    "Messages that invoke this bot’s commands",
-                    form.settings.commands,
-                    state.loading,
-                    cx.listener(|this, _, _, cx| {
+            body = body.child(section_label("Bot role"));
+            for (restricted, label, description) in [
+                (
+                    true,
+                    "Restricted bot (recommended)",
+                    "Only commands, mentions, and patterns you allow",
+                ),
+                (
+                    false,
+                    "Unrestricted bot",
+                    "All messages in channels this bot can access",
+                ),
+            ] {
+                let selected = form.restricted == restricted;
+                body = body.child(role_choice(
+                    if restricted {
+                        "bot-role-restricted"
+                    } else {
+                        "bot-role-unrestricted"
+                    },
+                    label,
+                    description,
+                    selected,
+                    state.loading || !state.snapshot.can_manage,
+                    cx.listener(move |this, _, _, cx| {
                         if let Some(f) = this.bot_ui.form.as_mut() {
-                            f.settings.commands = !f.settings.commands;
+                            f.restricted = restricted;
                         }
                         cx.notify();
                     }),
-                ))
-                .child(option(
-                    "bot-mentions",
-                    "Mentions",
-                    "Messages that @mention this bot",
-                    form.settings.mentions,
-                    state.loading,
-                    cx.listener(|this, _, _, cx| {
-                        if let Some(f) = this.bot_ui.form.as_mut() {
-                            f.settings.mentions = !f.settings.mentions;
-                        }
-                        cx.notify();
-                    }),
-                ))
-                .child(section_label("Message patterns"))
-                .child(note("Optional regular expressions, one per line."))
-                .child(bot_text_field(
-                    "bot-triggers-input",
-                    &form.triggers,
-                    window,
-                    cx,
                 ));
-            if is_channel {
-                body = body.child(section_label("Channels"));
-                let all = form.settings.conversations.is_empty();
-                body = body.child(option(
-                    "bot-all-channels",
-                    "All channels",
-                    "Allow access across this team",
-                    all,
-                    state.loading,
-                    cx.listener(|this, _, _, cx| {
-                        if let Some(f) = this.bot_ui.form.as_mut() {
-                            if f.settings.conversations.is_empty() {
-                                f.settings.conversations = vec![raw_id(&f.conversation)];
-                            } else {
-                                f.settings.conversations.clear();
+            }
+            if !form.restricted {
+                body = body.child(note("This grants access to every message in accessible channels, including messages that do not mention or invoke the bot. Channel allowlists and message triggers apply only to restricted bots."));
+            }
+            if form.restricted {
+                let is_channel = self.models.conversation.summary.kind == ConversationKind::Channel;
+                let scope_summary = if !is_channel {
+                    "Allowed in this conversation only.".to_string()
+                } else if form.settings.conversations.is_empty() {
+                    "Allowed in all team channels.".to_string()
+                } else if form.settings.conversations == vec![raw_id(&form.conversation)] {
+                    format!("Allowed in {destination} only.")
+                } else {
+                    format!(
+                        "Allowed in {} selected channels.",
+                        form.settings.conversations.len()
+                    )
+                };
+                body = body
+                    .child(note(scope_summary))
+                    .child(section_label("Messages this bot can receive"))
+                    .child(option(
+                        "bot-commands",
+                        "Commands",
+                        "Messages that invoke this bot’s commands",
+                        form.settings.commands,
+                        state.loading,
+                        cx.listener(|this, _, _, cx| {
+                            if let Some(f) = this.bot_ui.form.as_mut() {
+                                f.settings.commands = !f.settings.commands;
                             }
-                        }
-                        cx.notify();
-                    }),
-                ));
-                if !all {
-                    let snapshot = self.app_store.snapshot();
-                    let channels: Vec<_> = snapshot
-                        .workspace
-                        .channels
-                        .iter()
-                        .filter(|s| {
-                            s.group.as_ref().map(|g| &g.id)
-                                == self
-                                    .models
-                                    .conversation
-                                    .summary
-                                    .group
-                                    .as_ref()
-                                    .map(|g| &g.id)
-                        })
-                        .cloned()
-                        .collect();
-                    let mut shown = Vec::new();
-                    for channel in channels
-                        .iter()
-                        .chain(std::iter::once(&self.models.conversation.summary))
-                    {
-                        let id = raw_id(&channel.id);
-                        if shown.contains(&id) {
-                            continue;
-                        }
-                        shown.push(id.clone());
-                        let selected = form.settings.conversations.contains(&id);
-                        body = body.child(option(
-                            SharedString::from(format!("bot-scope-{id}")),
-                            &channel.title,
-                            "",
-                            selected,
-                            state.loading,
-                            cx.listener(move |this, _, _, cx| {
-                                if let Some(f) = this.bot_ui.form.as_mut() {
-                                    if f.settings.conversations.contains(&id) {
-                                        if f.settings.conversations.len() > 1 {
-                                            f.settings.conversations.retain(|s| s != &id);
-                                        }
-                                    } else {
-                                        f.settings.conversations.push(id.clone());
-                                    }
+                            cx.notify();
+                        }),
+                    ))
+                    .child(option(
+                        "bot-mentions",
+                        "Mentions",
+                        "Messages that @mention this bot",
+                        form.settings.mentions,
+                        state.loading,
+                        cx.listener(|this, _, _, cx| {
+                            if let Some(f) = this.bot_ui.form.as_mut() {
+                                f.settings.mentions = !f.settings.mentions;
+                            }
+                            cx.notify();
+                        }),
+                    ))
+                    .child(section_label("Message patterns"))
+                    .child(note("Optional regular expressions, one per line."))
+                    .child(bot_text_field(
+                        "bot-triggers-input",
+                        &form.triggers,
+                        window,
+                        cx,
+                    ));
+                if is_channel {
+                    body = body.child(section_label("Channels")).child(note("Settings apply across this team. Choose at least one channel, or allow all channels."));
+                    let all = form.settings.conversations.is_empty();
+                    body = body.child(option(
+                        "bot-all-channels",
+                        "All channels",
+                        "Allow access across this team",
+                        all,
+                        state.loading,
+                        cx.listener(|this, _, _, cx| {
+                            if let Some(f) = this.bot_ui.form.as_mut() {
+                                if f.settings.conversations.is_empty() {
+                                    f.settings.conversations = vec![raw_id(&f.conversation)];
+                                } else {
+                                    f.settings.conversations.clear();
                                 }
-                                cx.notify();
-                            }),
-                        ));
-                    }
-                    let others = form
-                        .settings
-                        .conversations
-                        .iter()
-                        .filter(|id| !shown.contains(id))
-                        .count();
-                    if others > 0 {
-                        body = body.child(note(format!(
-                            "Also includes {others} channels outside the loaded list."
-                        )));
+                            }
+                            cx.notify();
+                        }),
+                    ));
+                    if !all {
+                        let channels = &state.snapshot.channels;
+                        let mut shown = Vec::new();
+                        for channel in channels
+                            .iter()
+                            .chain(std::iter::once(&self.models.conversation.summary))
+                        {
+                            let id = raw_id(&channel.id);
+                            if shown.contains(&id) {
+                                continue;
+                            }
+                            shown.push(id.clone());
+                            let selected = form.settings.conversations.contains(&id);
+                            body = body.child(option(
+                                SharedString::from(format!("bot-scope-{id}")),
+                                &channel.title,
+                                "",
+                                selected,
+                                state.loading,
+                                cx.listener(move |this, _, _, cx| {
+                                    if let Some(f) = this.bot_ui.form.as_mut() {
+                                        if f.settings.conversations.contains(&id) {
+                                            if f.settings.conversations.len() > 1 {
+                                                f.settings.conversations.retain(|s| s != &id);
+                                            }
+                                        } else {
+                                            f.settings.conversations.push(id.clone());
+                                        }
+                                    }
+                                    cx.notify();
+                                }),
+                            ));
+                        }
+                        for id in form
+                            .settings
+                            .conversations
+                            .iter()
+                            .filter(|id| !shown.contains(id))
+                        {
+                            let id = id.clone();
+                            body = body.child(option(
+                                SharedString::from(format!("bot-scope-{id}")),
+                                &format!("Unavailable channel ({id})"),
+                                "Saved access is preserved until you remove it",
+                                true,
+                                state.loading,
+                                cx.listener(move |this, _, _, cx| {
+                                    if let Some(f) = this.bot_ui.form.as_mut()
+                                        && f.settings.conversations.len() > 1
+                                    {
+                                        f.settings.conversations.retain(|s| s != &id);
+                                    }
+                                    cx.notify();
+                                }),
+                            ));
+                        }
                     }
                 }
             }
         }
-        if let Some(error) = state.error {
+        if let Some(error) = &state.snapshot.channels_error {
+            body = body.child(note(error.clone())).child(
+                secondary_button("bot-channel-retry", "Retry channel list").on_click(cx.listener(
+                    |this, _, _, cx| {
+                        if !this.current_bots().loading {
+                            this.request_bots(
+                                this.models.conversation.summary.id.clone(),
+                                BotOperation::Load,
+                            );
+                        }
+                        cx.notify();
+                    },
+                )),
+            );
+        }
+
+        let form_error = state
+            .failed_mutation
+            .as_ref()
+            .filter(|(request, _)| form.pending == Some(*request))
+            .map(|(_, error)| error.clone())
+            .or(state.error);
+        if let Some(error) = form_error {
             body = body.child(
                 div()
                     .text_size(typography::label())
@@ -282,12 +337,10 @@ impl AppWindow {
         } else {
             label
         };
-        let disabled = state.loading
-            || username.is_empty()
-            || (mode == FormMode::Add && !state.snapshot.can_manage);
-        if mode == FormMode::Add && !state.loading && !state.snapshot.can_manage {
+        let disabled = state.loading || username.is_empty() || !state.snapshot.can_manage;
+        if !state.loading && !state.snapshot.can_manage {
             body = body.child(note(
-                "Your role does not allow adding bots to this conversation.",
+                "Your role does not allow managing bots in this conversation.",
             ));
         }
         let form_focus = form.username.focus_handle(cx);
@@ -405,6 +458,73 @@ fn modal_frame(
                         .child(body),
                 )
                 .child(footer),
+        )
+        .into_any_element()
+}
+
+fn role_choice(
+    id: &'static str,
+    label: &str,
+    description: &str,
+    selected: bool,
+    disabled: bool,
+    on_click: impl Fn(&gpui_kit::ClickEvent, &mut Window, &mut App) + 'static,
+) -> AnyElement {
+    div()
+        .id(id)
+        .rounded_md()
+        .border_1()
+        .border_color(rgb(if selected {
+            accent_strong()
+        } else {
+            crate::views::field_border()
+        }))
+        .bg(rgb(crate::views::field_bg()))
+        .px_3()
+        .py_2()
+        .flex()
+        .items_center()
+        .gap_3()
+        .cursor_pointer()
+        .when(disabled, |row| row.opacity(0.5))
+        .hover(|row| row.bg(tint(text_primary(), 0.05)))
+        .on_click(move |event, window, cx| {
+            if !disabled {
+                on_click(event, window, cx);
+            }
+        })
+        .child(
+            div()
+                .size(px(16.))
+                .flex_shrink_0()
+                .rounded_full()
+                .border_1()
+                .border_color(rgb(if selected {
+                    accent_strong()
+                } else {
+                    crate::views::field_border()
+                }))
+                .flex()
+                .items_center()
+                .justify_center()
+                .when(selected, |circle| {
+                    circle.child(div().size(px(8.)).rounded_full().bg(rgb(accent_strong())))
+                }),
+        )
+        .child(
+            div()
+                .flex_1()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(
+                    div()
+                        .text_size(typography::label())
+                        .text_color(rgb(text_primary()))
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(label.to_string()),
+                )
+                .child(note(description.to_string())),
         )
         .into_any_element()
 }

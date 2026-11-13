@@ -32,21 +32,30 @@ impl DemoBackend {
             }
             operation => {
                 match &operation {
-                    BotOperation::Add { username, settings } => {
+                    BotOperation::Add {
+                        username,
+                        settings,
+                        restricted,
+                    } => {
                         snapshot.bots.push(BotInfo {
                             username: username.clone(),
-                            restricted: true,
-                            settings: Some(settings.clone()),
+                            restricted: *restricted,
+                            settings: restricted.then(|| settings.clone()),
                         });
                         if let Some(command) = public_command(username) {
                             snapshot.commands.push(command);
                         }
                     }
-                    BotOperation::Save { username, settings } => {
+                    BotOperation::Save {
+                        username,
+                        settings,
+                        restricted,
+                    } => {
                         if let Some(bot) =
                             snapshot.bots.iter_mut().find(|b| &b.username == username)
                         {
-                            bot.settings = Some(settings.clone());
+                            bot.restricted = *restricted;
+                            bot.settings = restricted.then(|| settings.clone());
                         }
                     }
                     BotOperation::Remove { username } => {

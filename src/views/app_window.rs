@@ -3372,6 +3372,7 @@ impl AppWindow {
             | DemoScene::Bots
             | DemoScene::BotDetails
             | DemoScene::BotAccess
+            | DemoScene::BotUnrestricted
             | DemoScene::BotAdd
             | DemoScene::BotAddReview
             | DemoScene::BotRemove

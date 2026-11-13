@@ -43,6 +43,7 @@ pub enum DemoScene {
     Bots,
     BotDetails,
     BotAccess,
+    BotUnrestricted,
     BotAdd,
     BotAddReview,
     BotRemove,
@@ -83,7 +84,7 @@ pub enum DemoScene {
 }
 
 impl DemoScene {
-    pub const ALL: [Self; 44] = [
+    pub const ALL: [Self; 45] = [
         Self::Chat,
         Self::ChatGrouped,
         Self::TeamDetails,
@@ -97,6 +98,7 @@ impl DemoScene {
         Self::Bots,
         Self::BotDetails,
         Self::BotAccess,
+        Self::BotUnrestricted,
         Self::BotAdd,
         Self::BotAddReview,
         Self::BotRemove,
@@ -145,6 +147,7 @@ impl DemoScene {
             Self::Bots => "bots",
             Self::BotDetails => "bot-details",
             Self::BotAccess => "bot-access",
+            Self::BotUnrestricted => "bot-unrestricted",
             Self::BotAdd => "bot-add",
             Self::BotAddReview => "bot-add-review",
             Self::BotRemove => "bot-remove",

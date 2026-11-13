@@ -1816,7 +1816,13 @@ pub(crate) fn demo_bot_snapshot(
                 usage: "!build [branch]".into(),
             },
         ],
+        channels: demo_team_channels(DEMO_TEAM_ID)
+            .into_iter()
+            .map(|c| c.conversation)
+            .collect(),
+        team_id: Some(DEMO_TEAM_ID.into()),
         can_manage: true,
+        ..Default::default()
     }
 }
 

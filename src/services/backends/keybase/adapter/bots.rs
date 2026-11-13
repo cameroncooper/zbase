@@ -6,6 +6,7 @@ const PREFIX: &str = "chat.1.local.";
 pub(super) fn run(
     sender: Sender<BackendEvent>,
     local_store: Arc<LocalStore>,
+    account_id: AccountId,
     conversation: ProviderConversationRef,
     request: u64,
     operation: BotOperation,
@@ -27,18 +28,26 @@ pub(super) fn run(
         return;
     }
     let conversation_id = canonical_conversation_id_from_provider_ref(&conversation);
-    let mut result = execute(&conversation, operation).map_err(|error| error.to_string());
+    let mut changed_team = None;
+    let mut changed = false;
+    let mut result =
+        execute(&conversation, operation, &account_id).map_err(|error| error.to_string());
     if let Ok(BotResult::Changed { operation, .. }) = result {
-        let (snapshot, refresh_error) = match execute(&conversation, BotOperation::Load) {
-            Ok(BotResult::Loaded(snapshot)) => (Some(snapshot), None),
-            Err(error) => (
-                None,
-                Some(format!(
-                    "Bot updated. Could not refresh its details: {error}"
-                )),
-            ),
-            _ => unreachable!("Load only returns a snapshot"),
-        };
+        changed = true;
+        changed_team = resolve_team_id_from_conversation_ref_local(&conversation)
+            .ok()
+            .flatten();
+        let (snapshot, refresh_error) =
+            match execute(&conversation, BotOperation::Load, &account_id) {
+                Ok(BotResult::Loaded(snapshot)) => (Some(snapshot), None),
+                Err(error) => (
+                    None,
+                    Some(format!(
+                        "Bot updated. Could not refresh its details: {error}"
+                    )),
+                ),
+                _ => unreachable!("Load only returns a snapshot"),
+            };
         result = Ok(BotResult::Changed {
             operation,
             snapshot,
@@ -47,28 +56,43 @@ pub(super) fn run(
         run_load_conversation_members(sender.clone(), conversation_id.clone());
     }
     let _ = sender.send(BackendEvent::BotsResult {
-        conversation_id,
+        conversation_id: conversation_id.clone(),
         request,
         result,
     });
+    if changed {
+        let _ = sender.send(BackendEvent::BotsInvalidated {
+            team_id: changed_team,
+            except: Some(conversation_id.clone()),
+        });
+        spawn_sync_conversation_team_roles(
+            &sender,
+            &local_store,
+            conversation_id,
+            conversation,
+            true,
+        );
+    }
 }
 
 fn execute(
     conversation: &ProviderConversationRef,
     operation: BotOperation,
+    account_id: &AccountId,
 ) -> io::Result<BotResult> {
     let raw = provider_ref_to_conversation_id_bytes(conversation)
         .ok_or_else(|| io::Error::other("Missing Keybase conversation ID"))?;
     let path = socket_path().ok_or_else(|| io::Error::other("Keybase is not running"))?;
     // Resolve roles off the UI thread, including implicit teams used by group DMs.
     let lookup = matches!(operation, BotOperation::Lookup { .. });
-    let roles = if lookup {
-        HashMap::new()
+    let (team_id, roles) = if lookup {
+        (None, HashMap::new())
     } else {
         let team = resolve_team_id_from_conversation_ref_local(conversation)?.ok_or_else(|| {
             io::Error::other("Bot membership is unavailable for this conversation")
         })?;
-        fetch_team_roles_for_team(&team)?
+        let roles = fetch_team_roles_for_team(&team)?;
+        (Some(team), roles)
     };
     let runtime = Builder::new_current_thread().enable_all().build()?;
     runtime.block_on(async move {
@@ -111,68 +135,25 @@ fn execute(
                 )])],
             )
             .await?;
-        let username = status_username(&status)
+        let _username = status_username(&status)
             .ok_or_else(|| io::Error::other("Sign in to Keybase to manage bots"))?;
         let inbox = fetch_inbox_for_conversation_id(&mut client, &raw).await?;
-        let members_type = extract_team_lookup_params_from_inbox_response(&inbox).map(|(_,kind,_)|kind);
-        let can_manage = can_manage_bots(members_type, roles.get(&UserId::new(username)).copied());
+        let (team_name, members_type, _) = extract_team_lookup_params_from_inbox_response(&inbox)
+            .ok_or_else(|| {
+            io::Error::other("Bot membership is unavailable for this conversation")
+        })?;
+        let can_manage = effective_permissions(&mut client, &team_name, members_type).await?;
         let mutation = !matches!(operation, BotOperation::Load);
-        if mutation && !can_manage {
-            return Err(io::Error::other(
-                "Your Keybase role does not allow managing bots in this conversation",
-            ));
-        }
-        let mut args = base.clone();
-        match &operation {
-            BotOperation::Add { username, .. } if roles.contains_key(&UserId::new(username)) => {
-                return Err(io::Error::other("This account is already a team member. Manage its existing membership instead."));
-            }
-            BotOperation::Save { username, .. }
-                if roles.get(&UserId::new(username)) != Some(&6) =>
-            {
-                return Err(io::Error::other(
-                    "Only restricted bot settings can be edited here",
-                ));
-            }
-            BotOperation::Remove { username }
-                if !roles
-                    .get(&UserId::new(username))
-                    .is_some_and(|r| *r == 5 || *r == 6) =>
-            {
-                return Err(io::Error::other("This account is not an installed bot"));
-            }
-            _ => {}
-        }
-        match &operation {
-            BotOperation::Add { username, settings } => {
-                args.extend([
-                    (Value::from("username"), Value::from(username.clone())),
-                    (Value::from("role"), Value::from(6)),
-                    (Value::from("botSettings"), settings_value(settings)),
-                ]);
-                call(&mut client, "addBotMember", args).await?;
-            }
-            BotOperation::Save { username, settings } => {
-                // This RPC edits settings without changing the bot's membership role.
-                args.extend([
-                    (Value::from("username"), Value::from(username.clone())),
-                    (Value::from("botSettings"), settings_value(settings)),
-                ]);
-                call(&mut client, "setBotMemberSettings", args).await?;
-            }
-            BotOperation::Remove { username } => {
-                args.push((Value::from("username"), Value::from(username.clone())));
-                call(&mut client, "removeBotMember", args).await?;
-            }
-            _ => {}
-        }
-        // A successful mutation is final even if the subsequent refresh fails.
         if mutation {
-            return Ok(BotResult::Changed {
+            return mutate(
+                &mut client,
+                base,
+                (&team_name, members_type),
+                &roles,
                 operation,
-                snapshot: None,
-                refresh_error: None,
-            });
+                can_manage,
+            )
+            .await;
         }
         let value = call(&mut client, "listBotCommandsLocal", base.clone()).await?;
         let mut bots = Vec::new();
@@ -198,23 +179,146 @@ fn execute(
             });
         }
         bots.sort_by(|a, b| a.username.cmp(&b.username));
+        let (channels, channels_error) = if members_type == TEAM_MEMBERS_TYPE {
+            match team_channels::load_channels(&mut client, &team_name, account_id).await {
+                Ok((channels, _)) => (channels.into_iter().map(|c| c.conversation).collect(), None),
+                Err(error) => (
+                    Vec::new(),
+                    Some(format!("Could not load all team channels: {error}")),
+                ),
+            }
+        } else {
+            (Vec::new(), None)
+        };
         Ok(BotResult::Loaded(BotSnapshot {
             bots,
             commands: commands(&value),
             can_manage,
+            team_id,
+            channels,
+            channels_error,
         }))
     })
 }
 
+// The narrow transport seam lets mutation failures and permission races be tested
+// without modifying a user's Keybase membership.
+trait BotRpc {
+    async fn request(&mut self, method: &str, args: Vec<(Value, Value)>) -> io::Result<Value>;
+}
+impl BotRpc for KeybaseRpcClient {
+    async fn request(&mut self, method: &str, args: Vec<(Value, Value)>) -> io::Result<Value> {
+        self.call(method, vec![Value::Map(args)]).await
+    }
+}
 async fn call(
-    client: &mut KeybaseRpcClient,
+    client: &mut impl BotRpc,
     method: &str,
     args: Vec<(Value, Value)>,
 ) -> io::Result<Value> {
-    client
-        .call(&format!("{PREFIX}{method}"), vec![Value::Map(args)])
-        .await
+    client.request(&format!("{PREFIX}{method}"), args).await
 }
+async fn effective_permissions(
+    client: &mut impl BotRpc,
+    team_name: &str,
+    members_type: i64,
+) -> io::Result<bool> {
+    // All participants manage implicit teams; explicit teams include ancestor admins.
+    if matches!(members_type, 2 | 3) {
+        return Ok(true);
+    }
+    let permissions = client
+        .request(
+            "keybase.1.teams.canUserPerform",
+            vec![("name".into(), team_name.into())],
+        )
+        .await?;
+    map_get(&permissions, "manageBots")
+        .and_then(as_bool)
+        .ok_or_else(|| io::Error::other("Keybase did not return bot-management permissions"))
+}
+async fn mutate(
+    client: &mut impl BotRpc,
+    mut args: Vec<(Value, Value)>,
+    scope: (&str, i64),
+    roles: &HashMap<UserId, i64>,
+    operation: BotOperation,
+    can_manage: bool,
+) -> io::Result<BotResult> {
+    let (team_name, members_type) = scope;
+    if !can_manage {
+        return Ok(BotResult::MutationFailed {
+            error: "Your Keybase role does not allow managing bots in this conversation".into(),
+            can_manage: Some(false),
+        });
+    }
+    let (method, username) = match &operation {
+        BotOperation::Add { username, .. } => {
+            if roles.contains_key(&UserId::new(username)) {
+                return Err(io::Error::other(
+                    "This account is already a team member. Manage its existing membership instead.",
+                ));
+            }
+            ("addBotMember", username)
+        }
+        BotOperation::Save { username, .. } | BotOperation::Remove { username } => {
+            if !roles
+                .get(&UserId::new(username))
+                .is_some_and(|role| matches!(role, 5 | 6))
+            {
+                return Err(io::Error::other("This account is not an installed bot"));
+            }
+            (
+                if matches!(operation, BotOperation::Save { .. }) {
+                    "editBotMember"
+                } else {
+                    "removeBotMember"
+                },
+                username,
+            )
+        }
+        _ => return Err(io::Error::other("Expected a bot membership change")),
+    };
+    args.push(("username".into(), username.clone().into()));
+    if let BotOperation::Add {
+        settings,
+        restricted,
+        ..
+    }
+    | BotOperation::Save {
+        settings,
+        restricted,
+        ..
+    } = &operation
+    {
+        args.extend([
+            ("role".into(), (if *restricted { 6 } else { 5 }).into()),
+            (
+                "botSettings".into(),
+                if *restricted {
+                    settings_value(settings)
+                } else {
+                    Value::Nil
+                },
+            ),
+        ]);
+    }
+    if let Err(error) = call(client, method, args).await {
+        let can_manage = effective_permissions(client, team_name, members_type)
+            .await
+            .ok();
+        return Ok(BotResult::MutationFailed {
+            error: error.to_string(),
+            can_manage,
+        });
+    }
+    Ok(BotResult::Changed {
+        operation,
+        snapshot: None,
+        refresh_error: None,
+    })
+}
+
 fn commands(value: &Value) -> Vec<BotCommand> {
     map_get(value, "commands")
         .and_then(as_array)
@@ -278,10 +382,6 @@ fn settings_value(settings: &BotSettings) -> Value {
     ])
 }
 
-fn can_manage_bots(members_type: Option<i64>, role: Option<i64>) -> bool {
-    // Every participant can manage bots in implicit teams (DMs and group DMs).
-    matches!(members_type, Some(2 | 3)) || matches!(role, Some(3 | 4))
-}
 fn featured(offset: usize) -> io::Result<crate::domain::bots::FeaturedBotPage> {
     let path = socket_path().ok_or_else(|| io::Error::other("Keybase is not running"))?;
     Builder::new_current_thread()
@@ -347,14 +447,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn dm_participants_can_manage_bots_but_team_writers_cannot() {
-        assert!(can_manage_bots(Some(2), Some(2)));
-        assert!(can_manage_bots(Some(3), Some(2)));
-        assert!(!can_manage_bots(Some(1), Some(2)));
-        assert!(can_manage_bots(Some(1), Some(3)));
-        assert!(!can_manage_bots(None, None));
-    }
-    #[test]
     fn featured_catalog_parses_alias_owner_description_and_paging() {
         let value = Value::Map(vec![
             (
@@ -398,14 +490,43 @@ mod live_tests {
     #[ignore = "requires a running Keybase daemon and ZBASE_TEST_BOT_CONVERSATION set to a DM"]
     fn reads_live_dm_bot_permissions() {
         let id = std::env::var("ZBASE_TEST_BOT_CONVERSATION").expect("set a DM conversation ID");
-        let BotResult::Loaded(snapshot) =
-            execute(&ProviderConversationRef::new(id), BotOperation::Load).expect("load DM bots")
-        else {
+        let BotResult::Loaded(snapshot) = execute(
+            &ProviderConversationRef::new(id),
+            BotOperation::Load,
+            &AccountId::default(),
+        )
+        .expect("load DM bots") else {
             panic!("expected snapshot")
         };
         assert!(
             snapshot.can_manage,
             "DM participants must be able to add bots"
+        );
+    }
+    #[test]
+    #[ignore = "requires Keybase and ZBASE_TEST_BOT_TEAM_CONVERSATION set to a team channel"]
+    fn reads_live_team_permissions_and_full_directory() {
+        let id =
+            std::env::var("ZBASE_TEST_BOT_TEAM_CONVERSATION").expect("set a team conversation ID");
+        let BotResult::Loaded(snapshot) = execute(
+            &ProviderConversationRef::new(id),
+            BotOperation::Load,
+            &AccountId::default(),
+        )
+        .expect("load team bots") else {
+            panic!("expected snapshot")
+        };
+        assert!(snapshot.team_id.is_some());
+        assert!(
+            snapshot.channels_error.is_none(),
+            "{:?}",
+            snapshot.channels_error
+        );
+        assert!(!snapshot.channels.is_empty());
+        println!(
+            "Read team permissions, {} bots, and {} directory channels",
+            snapshot.bots.len(),
+            snapshot.channels.len()
         );
     }
     #[test]
@@ -433,7 +554,8 @@ mod live_tests {
     fn reads_live_bot_metadata_without_mutating_membership() {
         let id = std::env::var("ZBASE_TEST_BOT_CONVERSATION").expect("set a conversation ID");
         let conversation = ProviderConversationRef::new(id);
-        let result = execute(&conversation, BotOperation::Load).expect("load conversation bots");
+        let result = execute(&conversation, BotOperation::Load, &AccountId::default())
+            .expect("load conversation bots");
         let BotResult::Loaded(snapshot) = result else {
             panic!("expected bot snapshot")
         };
@@ -447,6 +569,7 @@ mod live_tests {
             BotOperation::Lookup {
                 username: "zoombot".into(),
             },
+            &AccountId::default(),
         )
         .expect("look up ZoomBot");
         let BotResult::Lookup { username, commands } = lookup else {
@@ -456,3 +579,6 @@ mod live_tests {
         assert!(commands.iter().any(|c| c.name == "zoom"));
     }
 }
+
+#[cfg(test)]
+mod mutation_tests;

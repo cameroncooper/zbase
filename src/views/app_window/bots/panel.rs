@@ -253,7 +253,7 @@ impl AppWindow {
         body = body.child(bot_section("Access", access.into_any_element()));
         if state.snapshot.can_manage && !state.loading {
             let mut actions = div().flex().flex_col().gap_2();
-            if bot.restricted && bot.settings.is_some() {
+            if !bot.restricted || bot.settings.is_some() {
                 let edit = bot.clone();
                 actions =
                     actions.child(secondary_button("bot-edit-access", "Edit access").on_click(

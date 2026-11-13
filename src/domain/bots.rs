@@ -47,6 +47,9 @@ pub struct BotSnapshot {
     pub bots: Vec<BotInfo>,
     pub commands: Vec<BotCommand>,
     pub can_manage: bool,
+    pub team_id: Option<String>,
+    pub channels: Vec<crate::domain::conversation::ConversationSummary>,
+    pub channels_error: Option<String>,
 }
 #[derive(Clone, Debug)]
 pub enum BotOperation {
@@ -60,10 +63,12 @@ pub enum BotOperation {
     Add {
         username: String,
         settings: BotSettings,
+        restricted: bool,
     },
     Save {
         username: String,
         settings: BotSettings,
+        restricted: bool,
     },
     Remove {
         username: String,
@@ -77,6 +82,10 @@ pub enum BotResult {
         snapshot: Option<BotSnapshot>,
         refresh_error: Option<String>,
     },
+    MutationFailed {
+        error: String,
+        can_manage: Option<bool>,
+    },
     Lookup {
         username: String,
         commands: Vec<BotCommand>,
@@ -87,6 +96,9 @@ pub struct ConversationBots {
     pub snapshot: BotSnapshot,
     pub request: u64,
     pub loading: bool,
+    pub mutation_pending: bool,
+    pub failed_mutation: Option<(u64, String)>,
+    pub invalidated: bool,
     pub error: Option<String>,
     pub lookup: Option<(String, Vec<BotCommand>)>,
     pub completed_request: u64,

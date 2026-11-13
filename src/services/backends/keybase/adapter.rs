@@ -1709,6 +1709,7 @@ impl ChatBackend for KeybaseBackend {
                 Ok(Vec::new())
             }
             RoutedBackendCommand::Bots {
+                account_id,
                 conversation,
                 request,
                 operation,
@@ -1718,7 +1719,14 @@ impl ChatBackend for KeybaseBackend {
                 let local_store = Arc::clone(&self.local_store);
                 if let Some(sender) = self.inbound_sender.clone() {
                     task_runtime::spawn_task(TaskPriority::High, None, move || {
-                        bots::run(sender, local_store, conversation, request, operation)
+                        bots::run(
+                            sender,
+                            local_store,
+                            account_id,
+                            conversation,
+                            request,
+                            operation,
+                        )
                     });
                 }
                 Ok(Vec::new())
@@ -1729,6 +1737,13 @@ impl ChatBackend for KeybaseBackend {
                     return Ok(Vec::new());
                 };
                 let conversation_id = canonical_conversation_id_from_provider_ref(&conversation);
+                spawn_sync_conversation_team_roles(
+                    &sender,
+                    &self.local_store,
+                    conversation_id.clone(),
+                    conversation.clone(),
+                    true,
+                );
                 let dedupe_key = format!("load_conversation_members:{}", conversation_id.0);
                 let _ = task_runtime::spawn_task(TaskPriority::High, Some(dedupe_key), move || {
                     run_load_conversation_members(sender, conversation_id);
@@ -8316,10 +8331,20 @@ fn maybe_handle_team_role_notify(
     team_ids.sort();
     team_ids.dedup();
     if team_ids.is_empty() {
+        // Name-only and role-map version notifications have no ID. Invalidate
+        // all cached bot metadata rather than retaining obsolete privileges.
+        let _ = sender.send(BackendEvent::BotsInvalidated {
+            team_id: None,
+            except: None,
+        });
         return;
     }
 
     for team_id in team_ids {
+        let _ = sender.send(BackendEvent::BotsInvalidated {
+            team_id: Some(team_id.clone()),
+            except: None,
+        });
         let Ok(conversation_ids) = local_store.load_conversation_ids_for_team(&team_id) else {
             continue;
         };
