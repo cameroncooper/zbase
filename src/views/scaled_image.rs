@@ -6,7 +6,9 @@
 //! with Lanczos, to a nearby size bucket, keeps edges and detail smooth the
 //! way a browser's downscale does.
 use gpui_kit::{App, ImageAssetLoader, ImageCacheError, ImageSource, Resource, Window};
-use image::{ImageFormat, ImageReader, RgbaImage, imageops::FilterType};
+use image::{
+    DynamicImage, ImageDecoder, ImageFormat, ImageReader, RgbaImage, imageops::FilterType,
+};
 use std::path::PathBuf;
 
 mod state;
@@ -47,7 +49,12 @@ fn scale_file(source: &ScaledSource) -> Result<RgbaImage, ImageCacheError> {
             "animated formats are not pre-scaled".into(),
         ));
     }
-    let decoded = reader.decode()?;
+    let mut decoder = reader.into_decoder()?;
+    let orientation = decoder.orientation()?;
+    let mut decoded = DynamicImage::from_decoder(decoder)?;
+    // Originals can retain camera EXIF rotation even when Keybase's preview
+    // pixels are already upright. Orient before measuring or resampling.
+    decoded.apply_orientation(orientation);
     let x = source.width_px as f64 / decoded.width() as f64;
     let y = source.height_px as f64 / decoded.height() as f64;
     let scale = match source.fit {
@@ -146,6 +153,64 @@ mod tests {
             fit,
         };
         scale_file(&source).ok().map(|image| image.dimensions())
+    }
+
+    #[test]
+    fn camera_orientation_is_applied_to_full_size_and_resampled_attachments() {
+        use image::{Rgb, RgbImage};
+        // Four distinct corners make rotations and mirrored orientations visible.
+        let colors = [[240, 20, 20], [20, 240, 20], [20, 20, 240], [240, 240, 20]];
+        let pixels = RgbImage::from_fn(80, 40, |x, y| {
+            Rgb(colors[usize::from(x >= 40) + 2 * usize::from(y >= 20)])
+        });
+        let mut jpeg = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 100)
+            .encode_image(&pixels)
+            .unwrap();
+        // EXIF IFD0 orientation in a little-endian TIFF inside JPEG APP1.
+        for orientation in 1u8..=8 {
+            let mut exif = b"Exif\0\0II\x2a\0\x08\0\0\0\x01\0\x12\x01\x03\0\x01\0\0\0".to_vec();
+            exif.extend_from_slice(&[orientation, 0, 0, 0, 0, 0, 0, 0]);
+            let mut bytes = jpeg[..2].to_vec();
+            bytes.extend_from_slice(&[0xff, 0xe1]);
+            bytes.extend_from_slice(&((exif.len() + 2) as u16).to_be_bytes());
+            bytes.extend_from_slice(&exif);
+            bytes.extend_from_slice(&jpeg[2..]);
+            let path = std::env::temp_dir().join(format!(
+                "zbase-exif-{}-{orientation}.attachment",
+                std::process::id()
+            ));
+            std::fs::write(&path, bytes).unwrap();
+            for size in [160, 20] {
+                let image = scale_file(&ScaledSource {
+                    path: path.clone(),
+                    width_px: size,
+                    height_px: size,
+                    fit: Fit::Contain,
+                })
+                .unwrap();
+                let long = size.min(80);
+                assert_eq!(
+                    image.dimensions(),
+                    if orientation >= 5 {
+                        (long / 2, long)
+                    } else {
+                        (long, long / 2)
+                    }
+                );
+                let expected = colors[[0, 1, 3, 2, 0, 2, 3, 1][orientation as usize - 1]];
+                let actual = image.get_pixel(1, 1).0;
+                for (actual, expected) in
+                    [actual[2], actual[1], actual[0]].into_iter().zip(expected)
+                {
+                    assert!(
+                        actual.abs_diff(expected) < 25,
+                        "orientation {orientation}, size {size}: wrong corner"
+                    );
+                }
+            }
+            std::fs::remove_file(path).unwrap();
+        }
     }
 
     #[test]
