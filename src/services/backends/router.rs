@@ -174,6 +174,26 @@ impl BackendRouter {
                     conversation: binding.provider_conversation_ref,
                 })
             }
+            BackendCommand::Bots {
+                conversation_id,
+                request,
+                operation,
+            } => {
+                let binding = self
+                    .conversation_bindings
+                    .get(&conversation_id)
+                    .cloned()
+                    .ok_or_else(|| {
+                        BackendError::MissingConversationBinding(conversation_id.0.clone())
+                    })?;
+                self.backend_for_binding(&binding.backend_id)?
+                    .execute(RoutedBackendCommand::Bots {
+                        account_id: binding.account_id,
+                        conversation: binding.provider_conversation_ref,
+                        request,
+                        operation,
+                    })
+            }
             BackendCommand::LoadConversationMembers { conversation_id } => {
                 let binding = self
                     .conversation_bindings

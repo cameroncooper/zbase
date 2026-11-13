@@ -140,6 +140,8 @@ pub struct MessageRecord {
     pub id: MessageId,
     pub conversation_id: ConversationId,
     pub author_id: UserId,
+    /// Restricted bot this message was encrypted for, when Keybase supplies it.
+    pub bot_username: Option<String>,
     pub reply_to: Option<MessageId>,
     pub thread_root_id: Option<MessageId>,
     pub timestamp_ms: Option<i64>,

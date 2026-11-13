@@ -80,6 +80,8 @@ pub struct MessageReactionsForMessage {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TeamRoleKind {
+    Bot,
+    RestrictedBot,
     Member,
     Admin,
     Owner,
@@ -110,6 +112,16 @@ pub enum BackendEvent {
         request_id: u64,
         channels: Vec<crate::domain::channel_details::TeamChannel>,
         conversation_bindings: Vec<ConversationBinding>,
+    },
+    FeaturedBotsResult {
+        request: u64,
+        offset: usize,
+        result: Result<crate::domain::bots::FeaturedBotPage, String>,
+    },
+    BotsResult {
+        conversation_id: ConversationId,
+        request: u64,
+        result: Result<crate::domain::bots::BotResult, String>,
     },
     BenchmarkPulse(std::time::Instant),
     AccountConnected {

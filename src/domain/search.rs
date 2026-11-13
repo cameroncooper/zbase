@@ -103,6 +103,7 @@ mod tests {
 
     fn message(author: &str, fragments: Vec<MessageFragment>) -> MessageRecord {
         MessageRecord {
+            bot_username: None,
             id: MessageId::new("1"),
             conversation_id: ConversationId::new("c"),
             author_id: UserId::new(author),
@@ -152,6 +153,7 @@ mod tests {
                 snippet: String::new(),
                 snippet_highlight_ranges: Vec::new(),
                 message: MessageRecord {
+                    bot_username: None,
                     timestamp_ms: Some(100),
                     ..message("a", Vec::new())
                 },

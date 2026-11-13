@@ -52,6 +52,12 @@ impl From<std::io::Error> for BackendError {
 
 #[derive(Clone, Debug)]
 pub enum RoutedBackendCommand {
+    Bots {
+        account_id: AccountId,
+        conversation: ProviderConversationRef,
+        request: u64,
+        operation: crate::domain::bots::BotOperation,
+    },
     LoadBootstrap {
         account_id: AccountId,
     },

@@ -8,6 +8,7 @@ pub enum RightPaneMode {
     Details,
     TeamDetails,
     Members,
+    Bots,
     Files,
     Search,
     Profile(UserId),

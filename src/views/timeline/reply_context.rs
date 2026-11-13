@@ -97,6 +97,7 @@ mod tests {
                 affinity: Affinity::None,
             },
             message: MessageRecord {
+                bot_username: None,
                 id: MessageId::new(id),
                 conversation_id: ConversationId::new("conversation"),
                 author_id: UserId::new("alice"),

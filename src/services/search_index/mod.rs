@@ -573,6 +573,7 @@ mod tests {
         let store = Arc::new(LocalStore::open_at(path.join("store")).unwrap());
         let conversation = ConversationId::new("conversation");
         let mut message = MessageRecord {
+            bot_username: None,
             id: MessageId::new("1"),
             conversation_id: conversation.clone(),
             author_id: UserId::new("alice"),

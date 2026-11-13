@@ -841,6 +841,7 @@ impl<'a> DemoMessage<'a> {
             .thread_root
             .map(|root| MessageId::new(root.to_string()));
         MessageRecord {
+            bot_username: None,
             permalink: format!("keybase://chat/{conversation_id}/{}", id.0),
             id,
             conversation_id: ConversationId::new(conversation_id),
@@ -1766,6 +1767,62 @@ pub(crate) fn demo_files_rows() -> Vec<TimelineRow> {
             })
         })
         .collect()
+}
+
+/// Bot fixtures shared by the offline backend and native UI scenes.
+pub(crate) fn demo_bot_snapshot(
+    conversation_id: &ConversationId,
+) -> crate::domain::bots::BotSnapshot {
+    use crate::domain::bots::{BotCommand, BotInfo, BotSettings, BotSnapshot};
+    let bot = BotInfo {
+        username: "zoombot".into(),
+        restricted: true,
+        settings: Some(BotSettings {
+            commands: true,
+            mentions: true,
+            conversations: vec![
+                conversation_id
+                    .0
+                    .strip_prefix("kb_conv:")
+                    .unwrap_or(&conversation_id.0)
+                    .to_string(),
+            ],
+            ..Default::default()
+        }),
+    };
+    BotSnapshot {
+        bots: vec![
+            bot.clone(),
+            BotInfo {
+                username: "buildbot".into(),
+                restricted: true,
+                settings: Some(BotSettings {
+                    commands: true,
+                    ..Default::default()
+                }),
+            },
+        ],
+        commands: vec![
+            BotCommand {
+                name: "zoom".into(),
+                username: "zoombot".into(),
+                description: "Create a Zoom meeting".into(),
+                usage: "!zoom".into(),
+            },
+            BotCommand {
+                name: "build".into(),
+                username: "buildbot".into(),
+                description: "Check the latest build".into(),
+                usage: "!build [branch]".into(),
+            },
+        ],
+        can_manage: true,
+    }
+}
+
+pub(crate) fn demo_featured_bots() -> crate::domain::bots::FeaturedBotPage {
+    use crate::domain::bots::{FeaturedBot, FeaturedBotPage};
+    FeaturedBotPage {bots:vec![FeaturedBot {username:"zoombot".into(),name:"Zoom Meetings".into(),description:"Zoom video calls in chat".into(),extended_description:"Start a Zoom meeting with the people in this conversation. Type !zoom after adding the bot to get a meeting link everyone can join.".into(),owner:"keybase".into(),rank:100},FeaturedBot {username:"reminderbot".into(),name:"Reminders".into(),description:"Set reminders for your team".into(),rank:10,..Default::default()}],is_last_page:true}
 }
 
 #[cfg(test)]

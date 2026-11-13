@@ -32,6 +32,11 @@ pub struct UploadedAttachment {
 
 #[derive(Clone, Debug)]
 pub enum BackendCommand {
+    Bots {
+        conversation_id: ConversationId,
+        request: u64,
+        operation: crate::domain::bots::BotOperation,
+    },
     ConnectAccount {
         account_id: AccountId,
     },

@@ -460,6 +460,40 @@ pub(crate) fn render_autocomplete_popup(
 
 fn render_candidate_row(candidate: &AutocompleteCandidate) -> AnyElement {
     match candidate {
+        AutocompleteCandidate::BotCommand {
+            text,
+            username,
+            description,
+        } => div()
+            .flex()
+            .flex_col()
+            .gap(px(2.))
+            .child(
+                div()
+                    .flex()
+                    .justify_between()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(rgb(text_primary()))
+                            .child(text.clone()),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(rgb(text_secondary()))
+                            .child(username.clone()),
+                    ),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(rgb(text_secondary()))
+                    .truncate()
+                    .child(description.clone()),
+            )
+            .into_any_element(),
         AutocompleteCandidate::MentionUser {
             username,
             display_name,

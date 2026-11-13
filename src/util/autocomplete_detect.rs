@@ -1,6 +1,7 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AutocompleteTriggerKind {
     Mention,
+    BotCommand,
     Emoji,
 }
 
@@ -23,7 +24,7 @@ pub fn detect_autocomplete_trigger(text: &str, cursor: usize) -> Option<TriggerM
         if ch.is_whitespace() {
             return None;
         }
-        if ch != '@' && ch != ':' {
+        if ch != '@' && ch != ':' && ch != '!' {
             continue;
         }
         if offset > 0 {
@@ -33,6 +34,17 @@ pub fn detect_autocomplete_trigger(text: &str, cursor: usize) -> Option<TriggerM
             }
         }
         let query = text[offset + ch.len_utf8()..cursor].to_string();
+        if ch == '!' {
+            // Keybase bot commands start the message, never a word in prose.
+            if !text[..offset].trim().is_empty() {
+                return None;
+            }
+            return Some(TriggerMatch {
+                kind: AutocompleteTriggerKind::BotCommand,
+                trigger_offset: offset,
+                query,
+            });
+        }
         if ch == '@' {
             return Some(TriggerMatch {
                 kind: AutocompleteTriggerKind::Mention,
@@ -124,6 +136,26 @@ fn emoji_query_valid(query: &str) -> bool {
 mod tests {
     use super::*;
 
+    #[test]
+    fn bot_commands_only_complete_at_the_start_outside_code() {
+        assert_eq!(
+            detect_autocomplete_trigger("!", 1).unwrap().kind,
+            AutocompleteTriggerKind::BotCommand
+        );
+        assert_eq!(detect_autocomplete_trigger("!zo", 3).unwrap().query, "zo");
+        for text in [
+            "hello !zoom",
+            "wow!zoom",
+            "`!zoom",
+            "```\n!zoom",
+            "!zoom argument",
+        ] {
+            assert!(
+                detect_autocomplete_trigger(text, text.len()).is_none(),
+                "{text}"
+            );
+        }
+    }
     #[test]
     fn detects_mention_trigger() {
         let matched = detect_autocomplete_trigger("hello @cam", "hello @cam".len());

@@ -80,6 +80,7 @@ pub enum TimelineRow {
 
 #[derive(Clone, Debug, Default)]
 pub struct TimelineModel {
+    pub bot_user_ids: std::collections::HashSet<UserId>,
     pub conversation_id: ConversationId,
     pub current_user_id: Option<UserId>,
     pub rows: Vec<TimelineRow>,
@@ -266,6 +267,7 @@ mod thread_summary_tests {
                 affinity: Affinity::None,
             },
             message: MessageRecord {
+                bot_username: None,
                 id: MessageId::new(id),
                 conversation_id: ConversationId::new("c"),
                 author_id: UserId::new(author),

@@ -1,6 +1,7 @@
 pub mod affinity;
 pub mod attachment;
 pub mod backend;
+pub mod bots;
 pub mod call;
 pub mod channel_details;
 pub mod conversation;
