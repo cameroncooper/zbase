@@ -4,7 +4,7 @@
 use super::ComposerTarget;
 use crate::services::giphy_service::{GiphyGif, GiphyService, GiphyView};
 use crate::views::{
-    accent, app_window::AppWindow, card_shadow, link_preview_image_source, modal_surface,
+    accent, app_window::AppWindow, card_shadow, link, link_preview_image_source, modal_surface,
     shell_border_strong, subtle_surface, text_secondary, tint, typography,
 };
 use gpui_kit::prelude::FluentBuilder;
@@ -58,13 +58,24 @@ pub(crate) fn render_giphy_picker(
         GiphyView::Unavailable => Some("GIF search isn't set up in this build.".to_string()),
         GiphyView::KeepTyping => Some("Keep typing to search GIPHY.".to_string()),
         GiphyView::Loading => Some("Searching GIPHY…".to_string()),
-        GiphyView::RateLimited => {
-            Some("GIF search has hit its hourly limit. Try again later.".to_string())
+        GiphyView::RateLimited { can_retry: false } => {
+            Some("GIPHY is getting too many searches. Try again in a minute.".to_string())
+        }
+        GiphyView::RateLimited { can_retry: true } => {
+            Some("GIPHY was getting too many searches.".to_string())
         }
         GiphyView::Failed => Some("Couldn't reach GIPHY.".to_string()),
         GiphyView::Recents([]) => Some("Type to search GIPHY. GIFs you send show up here.".into()),
         GiphyView::Results([]) => Some(format!("No GIFs for “{query}”.")),
         GiphyView::Recents(_) | GiphyView::Results(_) => None,
+    };
+    let can_retry = matches!(
+        view,
+        GiphyView::Failed | GiphyView::RateLimited { can_retry: true }
+    );
+    let retry_id = match target {
+        ComposerTarget::Conversation => "giphy-picker-composer-retry",
+        ComposerTarget::Thread => "giphy-picker-thread-retry",
     };
     let gifs = giphy_picker_gifs(service, query);
     let (grid_id, tile_id) = match target {
@@ -132,9 +143,24 @@ pub(crate) fn render_giphy_picker(
             picker.child(
                 div()
                     .py_2()
+                    .flex()
+                    .items_center()
+                    .gap_2()
                     .text_size(typography::body())
                     .text_color(rgb(text_secondary()))
-                    .child(notice),
+                    .child(notice)
+                    .when(can_retry, |row| {
+                        row.child(
+                            div()
+                                .id(retry_id)
+                                .text_color(rgb(link()))
+                                .cursor(CursorStyle::PointingHand)
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.retry_giphy_search(target, cx);
+                                }))
+                                .child("Try again"),
+                        )
+                    }),
             )
         })
         .when(!tiles.is_empty(), |picker| {

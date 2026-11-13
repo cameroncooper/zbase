@@ -12,7 +12,8 @@
 //! - results are kept per query, in memory and on disk, for a day;
 //! - a query is never in flight twice;
 //! - each client stops at `CLIENT_HOURLY_BUDGET` calls an hour, and after a
-//!   429 it waits out GIPHY's limit window.
+//!   429 it pauses for `RATE_LIMIT_PAUSE` before the picker offers a retry.
+//!   GIPHY sends no reset time, so the pause is a guess.
 
 use crate::services::local_store::paths::data_root;
 use reqwest::Url;
@@ -34,6 +35,7 @@ const MAX_CACHED_QUERIES: usize = 200;
 const MAX_RECENTS: usize = RESULTS_PER_SEARCH;
 const CLIENT_HOURLY_BUDGET: usize = 30;
 const HOUR: Duration = Duration::from_secs(60 * 60);
+const RATE_LIMIT_PAUSE: Duration = Duration::from_secs(60);
 const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_PREVIEW_BYTES: usize = 5 * 1024 * 1024;
 
@@ -61,7 +63,10 @@ pub enum GiphyView<'a> {
     /// Waiting for typing to pause, or for the response.
     Loading,
     Results(&'a [GiphyGif]),
-    RateLimited,
+    /// GIPHY or the hourly budget refused; `can_retry` once the pause is over.
+    RateLimited {
+        can_retry: bool,
+    },
     Failed,
 }
 
@@ -168,10 +173,11 @@ impl GiphyService {
         if let Some(cached) = self.fresh(&query) {
             return GiphyView::Results(&cached.gifs);
         }
+        let can_retry = !self.is_blocked(Instant::now());
         match self.failed.get(&query) {
-            Some(true) => GiphyView::RateLimited,
+            Some(true) => GiphyView::RateLimited { can_retry },
             Some(false) => GiphyView::Failed,
-            None if self.is_blocked(Instant::now()) => GiphyView::RateLimited,
+            None if !can_retry => GiphyView::RateLimited { can_retry },
             None => GiphyView::Loading,
         }
     }
@@ -282,7 +288,7 @@ impl GiphyService {
                             self.persist();
                         }
                         Err(SearchError::RateLimited) => {
-                            self.blocked_until = Some(Instant::now() + HOUR);
+                            self.blocked_until = Some(Instant::now() + RATE_LIMIT_PAUSE);
                             self.failed.insert(query, true);
                         }
                         Err(SearchError::Other) => {
@@ -306,6 +312,21 @@ impl GiphyService {
         self.disk.recents.insert(0, gif.clone());
         self.disk.recents.truncate(MAX_RECENTS);
         self.persist();
+    }
+
+    /// When a refused search may run again, while one is refused.
+    pub fn retry_at(&self) -> Option<Instant> {
+        let now = Instant::now();
+        let paused = self.blocked_until.filter(|until| now < *until);
+        let recent = self
+            .calls
+            .iter()
+            .filter(|call| now.duration_since(**call) < HOUR)
+            .collect::<Vec<_>>();
+        let budget_frees = (recent.len() >= CLIENT_HOURLY_BUDGET)
+            .then(|| recent[recent.len() - CLIENT_HOURLY_BUDGET])
+            .map(|oldest| *oldest + HOUR);
+        paused.max(budget_frees)
     }
 
     fn fresh(&self, query: &str) -> Option<&CachedSearch> {
@@ -561,13 +582,29 @@ mod tests {
         let now = Instant::now();
         service.calls = std::iter::repeat_n(now, CLIENT_HOURLY_BUDGET).collect();
         assert!(!service.search("cats"));
-        assert!(matches!(service.view("cats"), GiphyView::RateLimited));
+        assert!(matches!(
+            service.view("cats"),
+            GiphyView::RateLimited { can_retry: false }
+        ));
+        assert_eq!(service.retry_at(), Some(now + HOUR));
 
         service.calls.clear();
         service.failed.clear();
-        service.blocked_until = Some(now + HOUR);
+        service.blocked_until = Some(now + RATE_LIMIT_PAUSE);
         assert!(!service.search("dogs"));
-        assert!(matches!(service.view("dogs"), GiphyView::RateLimited));
+        assert!(matches!(
+            service.view("dogs"),
+            GiphyView::RateLimited { can_retry: false }
+        ));
+        assert_eq!(service.retry_at(), Some(now + RATE_LIMIT_PAUSE));
+
+        // The pause is over: the picker offers a retry, and it goes out.
+        service.blocked_until = Some(Instant::now());
+        assert!(matches!(
+            service.view("dogs"),
+            GiphyView::RateLimited { can_retry: true }
+        ));
+        assert_eq!(service.retry_at(), None);
         let _ = std::fs::remove_dir_all(dir);
     }
 

@@ -417,6 +417,8 @@ pub struct AppWindow {
     giphy_picker: Option<GiphyPicker>,
     /// After Escape the picker stays closed until the query changes.
     giphy_dismissed: Option<(InputAutocompleteTarget, String)>,
+    /// When the picker next redraws to offer a retry after a refused search.
+    giphy_retry_notice_at: Option<Instant>,
     dismissed_thread_autocomplete: Option<AutocompleteDismissSignature>,
     /// Keep the highlighted row of each inline autocomplete list in view.
     composer_autocomplete_scroll: ScrollHandle,
@@ -1105,6 +1107,7 @@ impl AppWindow {
             giphy: GiphyService::new(),
             giphy_picker: None,
             giphy_dismissed: None,
+            giphy_retry_notice_at: None,
             dismissed_thread_autocomplete: None,
             composer_autocomplete_scroll: ScrollHandle::new(),
             thread_autocomplete_scroll: ScrollHandle::new(),
@@ -1582,7 +1585,10 @@ impl AppWindow {
         }
         let mut needs_refresh = self.drain_video_decode_results();
         needs_refresh |= self.drain_og_fetch_results();
-        needs_refresh |= self.giphy.drain();
+        if self.giphy.drain() {
+            needs_refresh = true;
+            self.schedule_giphy_retry_notice(cx);
+        }
         needs_refresh |= self.drain_github_pr_results();
         needs_refresh |= self.poll_github_prs();
         let quick_switcher_typing = self.models.overlay.quick_switcher_open
@@ -6922,9 +6928,53 @@ impl AppWindow {
                     let still_typed = this.giphy_picker.as_ref().is_some_and(|picker| {
                         GiphyService::normalize_query(&picker.query) == normalized
                     });
-                    if still_typed && this.giphy.search(&normalized) {
+                    if still_typed {
+                        this.giphy.search(&normalized);
+                        this.schedule_giphy_retry_notice(cx);
                         cx.notify();
                     }
+                });
+            }
+        })
+        .detach();
+    }
+
+    /// Searches the open picker's query again, after a refusal or failure.
+    pub(crate) fn retry_giphy_search(
+        &mut self,
+        target: crate::views::composer::ComposerTarget,
+        cx: &mut Context<Self>,
+    ) {
+        let target = InputAutocompleteTarget::from_composer_target(target);
+        let Some(query) = self
+            .giphy_picker_for(target)
+            .map(|picker| picker.query.clone())
+        else {
+            return;
+        };
+        self.giphy.search(&query);
+        self.schedule_giphy_retry_notice(cx);
+        cx.notify();
+    }
+
+    /// Redraws the picker when a refused search may run again, so it can
+    /// offer the retry.
+    fn schedule_giphy_retry_notice(&mut self, cx: &mut Context<Self>) {
+        let Some(retry_at) = self.giphy.retry_at() else {
+            return;
+        };
+        if self.giphy_retry_notice_at == Some(retry_at) {
+            return;
+        }
+        self.giphy_retry_notice_at = Some(retry_at);
+        let wait = retry_at.saturating_duration_since(Instant::now()) + Duration::from_millis(50);
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let mut cx = cx.clone();
+            async move {
+                cx.background_executor().timer(wait).await;
+                let _ = this.update(&mut cx, |this, cx| {
+                    this.giphy_retry_notice_at = None;
+                    cx.notify();
                 });
             }
         })
@@ -6957,8 +7007,8 @@ impl AppWindow {
     }
 
     /// Sends the GIF at `index` of the open picker, as the link the Keybase
-    /// `/giphy` command sends. Does nothing while results are loading, so
-    /// Return never posts the raw `/giphy` text.
+    /// `/giphy` command sends. With no GIF there it retries the search
+    /// instead, so Return never posts the raw `/giphy` text.
     pub(crate) fn send_giphy_gif(
         &mut self,
         target: crate::views::composer::ComposerTarget,
@@ -6976,6 +7026,7 @@ impl AppWindow {
             index,
         )
         .cloned() else {
+            self.retry_giphy_search(target.composer_target(), cx);
             return;
         };
         self.giphy.record_sent(&gif);
