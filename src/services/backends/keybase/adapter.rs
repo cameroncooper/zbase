@@ -15881,6 +15881,7 @@ fn extract_link_preview_from_result(result: &Value) -> Option<LinkPreview> {
         is_video,
         github_pr: None,
         chat_message: None,
+        collapsed: false,
     })
 }
 

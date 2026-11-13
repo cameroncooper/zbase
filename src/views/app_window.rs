@@ -22,6 +22,7 @@ use crate::{
             NotificationLevel,
         },
         conversation::{ConversationKind, ConversationSummary},
+        giphy::giphy_media_preview,
         github_pr::GithubPrRef,
         ids::{ConversationId, MessageId, SidebarSectionId, UserId, WorkspaceId},
         message::{
@@ -303,6 +304,8 @@ pub struct AppWindow {
     sidebar_resize_drag: Option<SidebarResizeState>,
     timeline_list_state: ListState,
     timeline_row_render_cache: crate::views::timeline::TimelineRowRenderCache,
+    /// Media previews the viewer collapsed, keyed by `link_preview_collapse_key`.
+    collapsed_link_previews: HashSet<String>,
     pub(crate) code_highlight_cache: crate::views::code_highlight::CodeHighlightCache,
     files_panes: HashMap<ConversationId, crate::views::right_pane::files::FilesPaneState>,
     thread_scroll: ScrollHandle,
@@ -995,6 +998,7 @@ impl AppWindow {
                 px(1920.),
             ),
             timeline_row_render_cache: crate::views::timeline::TimelineRowRenderCache::default(),
+            collapsed_link_previews: HashSet::new(),
             code_highlight_cache: crate::views::code_highlight::CodeHighlightCache::default(),
             files_panes: HashMap::new(),
             thread_scroll: ScrollHandle::new(),
@@ -2014,8 +2018,46 @@ impl AppWindow {
             &self.og_service,
             self.models.thread_pane.replies.iter_mut().collect(),
         );
+        self.apply_media_preview_overrides();
         self.apply_github_pr_previews();
         self.apply_linked_message_previews();
+    }
+
+    fn apply_media_preview_overrides(&mut self) {
+        apply_media_preview_overrides(
+            &self.og_service,
+            &self.collapsed_link_previews,
+            self.models
+                .timeline
+                .rows
+                .iter_mut()
+                .filter_map(|row| {
+                    if let crate::models::timeline_model::TimelineRow::Message(message_row) = row {
+                        Some(&mut message_row.message)
+                    } else {
+                        None
+                    }
+                })
+                .chain(self.models.thread_pane.replies.iter_mut())
+                .collect(),
+        );
+    }
+
+    pub(crate) fn toggle_link_preview_collapsed(
+        &mut self,
+        message_id: &MessageId,
+        url: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let key = link_preview_collapse_key(message_id, url);
+        if !self.collapsed_link_previews.remove(&key) {
+            self.collapsed_link_previews.insert(key);
+        }
+        // Reads the previous layout, so it still anchors correctly after the update.
+        self.anchor_timeline_before_layout();
+        self.apply_media_preview_overrides();
+        self.timeline_row_render_cache.invalidate();
+        cx.notify();
     }
 
     /// Quotes the messages that `keybase://chat/...` links point to, loading
@@ -4623,6 +4665,7 @@ impl AppWindow {
         apply_link_previews_to_thread_replies(
             &self.og_service,
             &self.github_pr_service,
+            &self.collapsed_link_previews,
             &mut self.models.thread_pane.replies,
         );
         if self.pending_thread_scroll_to_bottom
@@ -5079,6 +5122,7 @@ impl AppWindow {
         apply_link_previews_to_thread_replies(
             &self.og_service,
             &self.github_pr_service,
+            &self.collapsed_link_previews,
             &mut self.models.thread_pane.replies,
         );
         self.apply_linked_message_previews();
@@ -12093,13 +12137,60 @@ fn apply_og_previews_to_messages(og_service: &OgService, messages: Vec<&mut Mess
     }
 }
 
+/// Shows direct GIPHY media links as the GIF, replacing any other preview for
+/// them, and marks the media previews the viewer collapsed. Until the GIF is
+/// downloaded the preview has no `thumbnail_asset`.
+fn apply_media_preview_overrides(
+    og_service: &OgService,
+    collapsed_link_previews: &HashSet<String>,
+    messages: Vec<&mut MessageRecord>,
+) {
+    for message in messages {
+        for url in extract_link_urls_from_fragments(&message.fragments) {
+            let Some(mut giphy) = giphy_media_preview(&url) else {
+                continue;
+            };
+            giphy = match og_service.lookup(&url) {
+                Some(Some(downloaded)) if downloaded.is_media => downloaded.clone(),
+                _ => LinkPreview {
+                    thumbnail_asset: None,
+                    ..giphy
+                },
+            };
+            match message
+                .link_previews
+                .iter_mut()
+                .find(|preview| urls_match(&preview.url, &url))
+            {
+                Some(existing) => *existing = giphy,
+                None => message.link_previews.push(giphy),
+            }
+        }
+        for preview in &mut message.link_previews {
+            preview.collapsed = preview.is_media
+                && collapsed_link_previews
+                    .contains(&link_preview_collapse_key(&message.id, &preview.url));
+        }
+    }
+}
+
+fn link_preview_collapse_key(message_id: &MessageId, url: &str) -> String {
+    format!("{}\n{}", message_id.0, url)
+}
+
 /// Store syncs replace thread replies with copies that lack fetched previews.
 fn apply_link_previews_to_thread_replies(
     og_service: &OgService,
     github_pr_service: &GithubPrService,
+    collapsed_link_previews: &HashSet<String>,
     replies: &mut [MessageRecord],
 ) {
     apply_og_previews_to_messages(og_service, replies.iter_mut().collect());
+    apply_media_preview_overrides(
+        og_service,
+        collapsed_link_previews,
+        replies.iter_mut().collect(),
+    );
     apply_github_pr_previews_to_messages(
         github_pr_service,
         Instant::now(),
@@ -12879,5 +12970,74 @@ mod tests {
         assert!(super::set_chat_message_preview(&mut message, url, None));
         assert_eq!(message.link_previews.len(), 1);
         assert_eq!(message.link_previews[0].chat_message, None);
+    }
+
+    #[test]
+    fn giphy_link_shows_the_gif_alone_and_can_be_collapsed() {
+        use crate::domain::message::LinkPreview;
+        use crate::services::{
+            local_store::LocalStore,
+            og_service::{OgFetchResult, OgService},
+        };
+
+        let url = "https://media3.giphy.com/media/v1.Y2lk/iKBAAfYNDu1dowhnEj/giphy.mp4#height=360&width=480&isvideo=true";
+        let mut message = test_message("7", None);
+        message.fragments = vec![MessageFragment::Link {
+            url: url.into(),
+            display: url.into(),
+        }];
+        // The card fetched from GIPHY's HTML page for the media link.
+        message.link_previews.push(LinkPreview {
+            url: url.into(),
+            title: Some("Lets Go Reaction GIF - Find & Share on GIPHY".into()),
+            thumbnail_asset: Some("/tmp/og.webp".into()),
+            ..LinkPreview::default()
+        });
+
+        let store_path = std::env::temp_dir().join(format!(
+            "zbase-giphy-preview-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let mut og_service = OgService::new(std::sync::Arc::new(
+            LocalStore::open_at(store_path.clone()).unwrap(),
+        ));
+        let mut collapsed = std::collections::HashSet::new();
+
+        // Still downloading: a media preview without an image yet.
+        super::apply_media_preview_overrides(&og_service, &collapsed, vec![&mut message]);
+        assert_eq!(message.link_previews.len(), 1);
+        let preview = &message.link_previews[0];
+        assert!(preview.is_media && !preview.collapsed);
+        assert_eq!(preview.thumbnail_asset, None);
+        assert_eq!(preview.title, None);
+        assert!(crate::views::is_media_link_only_message(
+            &message.fragments,
+            &message.link_previews
+        ));
+
+        let gif_path = "/cache/og_thumbnails/abc.gif";
+        og_service.apply_result(OgFetchResult {
+            url: url.into(),
+            preview: Some(LinkPreview {
+                thumbnail_asset: Some(gif_path.into()),
+                ..crate::domain::giphy::giphy_media_preview(url).unwrap()
+            }),
+        });
+        super::apply_media_preview_overrides(&og_service, &collapsed, vec![&mut message]);
+        assert_eq!(
+            message.link_previews[0].thumbnail_asset.as_deref(),
+            Some(gif_path)
+        );
+
+        collapsed.insert(super::link_preview_collapse_key(&message.id, url));
+        super::apply_media_preview_overrides(&og_service, &collapsed, vec![&mut message]);
+        assert!(message.link_previews[0].collapsed);
+
+        drop(og_service);
+        let _ = std::fs::remove_dir_all(store_path);
     }
 }

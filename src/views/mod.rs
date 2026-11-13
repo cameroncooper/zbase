@@ -868,6 +868,15 @@ pub fn attachment_image_source(attachment: &AttachmentSummary) -> Option<ImageSo
 /// `source` for an attachment drawn in a `width` by `height` point box,
 /// pre-scaled to the device pixels it covers (see [`scaled_image`]). Animated
 /// GIFs keep the plain loader, which animates their frames.
+/// A link preview's image: a downloaded file, or a remote URL.
+pub fn link_preview_image_source(source: &str) -> ImageSource {
+    if source.starts_with("http://") || source.starts_with("https://") {
+        ImageSource::from(SharedString::from(source.to_string()))
+    } else {
+        ImageSource::from(std::path::PathBuf::from(source))
+    }
+}
+
 pub fn display_image_source(
     attachment: &AttachmentSummary,
     source: ImageSource,
