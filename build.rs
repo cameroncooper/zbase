@@ -5,6 +5,7 @@ fn main() {
     println!("cargo:rerun-if-changed=native/notifications.m");
     println!("cargo:rerun-if-changed=native/status_item.m");
     println!("cargo:rerun-if-env-changed=SPARKLE_DIR");
+    println!("cargo:rerun-if-env-changed=ZBASE_GIPHY_API_KEY");
     #[cfg(windows)]
     windows_resources();
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("macos") {

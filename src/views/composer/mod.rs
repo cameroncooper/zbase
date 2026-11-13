@@ -27,6 +27,8 @@ use gpui_kit::{
 #[derive(Default)]
 pub struct ComposerPanel;
 
+pub(crate) mod giphy_picker;
+
 /// Which input a composer field drives; picks the handlers and element ids.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ComposerTarget {
