@@ -327,20 +327,21 @@ fn copy_literal(context: &mut ParseContext<'_>, start: usize, end: usize) {
 
     let output_start = context.output.len();
     context.output.push_str(&context.source[start..end]);
-    for boundary in (start + 1)..=end {
-        context.mapping[boundary] = output_start + (boundary - start);
+    for (slot, mapped) in context.mapping[start + 1..=end]
+        .iter_mut()
+        .zip(output_start + 1..)
+    {
+        *slot = mapped;
     }
 }
 
 fn map_skipped(context: &mut ParseContext<'_>, start: usize, end: usize) {
+    let end = end.min(context.source.len());
     if start >= end {
         return;
     }
     let mapped_index = context.output.len();
-    let end = end.min(context.source.len());
-    for boundary in (start + 1)..=end {
-        context.mapping[boundary] = mapped_index;
-    }
+    context.mapping[start + 1..=end].fill(mapped_index);
 }
 
 fn collect_protected_ranges(

@@ -75,6 +75,10 @@ const SECTION_HEADER_PX: f32 = 24.;
 const HEADER_ICON_PX: f32 = 12.;
 const VIEW_OPTIONS_MIN_WIDTH_PX: f32 = 200.;
 const SCROLLBAR_GUTTER_PX: f32 = 8.;
+const SCROLLBAR_PX: f32 = 8.;
+/// The scrollbar sits this far in from the sidebar's right edge, straddling the
+/// sidebar's padding and the list's empty gutter.
+const SCROLLBAR_EDGE_INSET_PX: f32 = 4.;
 
 /// A menu that pops up from the sidebar.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -521,22 +525,50 @@ struct GroupedSplit {
     share: Cell<Option<f32>>,
 }
 
-/// Keep toolbar/footer chrome outside the elastic viewport in both sidebar modes.
+/// Keep toolbar/footer chrome outside the elastic viewport in both sidebar modes,
+/// with a scrollbar near the sidebar's right edge that shows on hover and can be dragged.
 pub(super) fn scroll_viewport<H: gpui_kit::base::ScrollbarHandle + Clone>(
-    id: impl Into<gpui_kit::ElementId>,
+    id: impl Into<SharedString>,
     handle: &H,
     content: impl IntoElement,
     reduced_motion: bool,
 ) -> AnyElement {
+    let id = id.into();
+    let thumb = |thumb: gpui_kit::base::ScrollbarThumbStyle| {
+        thumb
+            .width(px(SCROLLBAR_PX))
+            .inset(px(0.))
+            .radius(px(SCROLLBAR_PX / 2.))
+    };
     div()
+        .relative()
         .flex_1()
         .min_h(px(0.))
         .flex()
         .flex_col()
+        // Reach into the sidebar's right padding for the scrollbar, without
+        // widening the list.
+        .mr(px(SCROLLBAR_EDGE_INSET_PX - SIDEBAR_PADDING_PX))
+        .pr(px(SIDEBAR_PADDING_PX - SCROLLBAR_EDGE_INSET_PX))
         .overflow_hidden()
         .child(
-            gpui_kit::base::ScrollBounce::new(id, handle, content)
+            gpui_kit::base::ScrollBounce::new(id.clone(), handle, content)
                 .enabled(gpui_kit::base::ScrollBounce::enabled_by_default() && !reduced_motion),
+        )
+        .child(
+            div().absolute().inset_0().child(
+                gpui_kit::base::Scrollbar::vertical(handle)
+                    .id(SharedString::from(format!("{id}-scrollbar")))
+                    .mode(gpui_kit::base::ScrollbarMode::Hover)
+                    .viewport_from_layout()
+                    .styles(|styles| {
+                        styles
+                            .track(|track| track.width(px(SCROLLBAR_PX)))
+                            .thumb(thumb)
+                            .thumb_hover(thumb)
+                            .thumb_active(thumb)
+                    }),
+            ),
         )
         .into_any_element()
 }

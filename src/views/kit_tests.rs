@@ -510,6 +510,73 @@ mod sidebar_bounce {
     fn sidebar_reduce_motion_disables_stretch(cx: &mut TestAppContext) {
         check(cx, true);
     }
+
+    #[gpui_kit::test]
+    fn dragging_the_sidebar_scrollbar_scrolls_both_modes(cx: &mut TestAppContext) {
+        for recent in [false, true] {
+            let handle = if recent {
+                Handle::Recent(UniformListScrollHandle::new())
+            } else {
+                Handle::Grouped(ScrollHandle::new())
+            };
+            let mut app = cx.new_app();
+            app.update(gpui_kit::init);
+            let (window, _) = app.update(|cx| {
+                gpui_kit::open_window(Default::default(), cx, |_, cx| {
+                    cx.new(|_| SidebarFixture {
+                        handle: handle.clone(),
+                        reduced_motion: false,
+                    })
+                })
+                .unwrap()
+            });
+            app.update_window(window, |_, window, cx| {
+                window.render_frame(cx);
+                // The thumb starts at the top, centered on the list's right edge.
+                let viewport = handle.scroll().viewport_bounds();
+                let grab = point(viewport.right(), viewport.top() + px(10.));
+                window.simulate_mouse_move(grab, cx);
+                window.render_frame(cx);
+                window.dispatch_event(
+                    gpui_kit::MouseDownEvent {
+                        button: gpui_kit::MouseButton::Left,
+                        position: grab,
+                        click_count: 1,
+                        ..Default::default()
+                    }
+                    .to_platform_input(),
+                    cx,
+                );
+                let dropped = grab + point(px(0.), px(100.));
+                window.dispatch_event(
+                    gpui_kit::MouseMoveEvent {
+                        position: dropped,
+                        pressed_button: Some(gpui_kit::MouseButton::Left),
+                        ..Default::default()
+                    }
+                    .to_platform_input(),
+                    cx,
+                );
+                window.dispatch_event(
+                    gpui_kit::MouseUpEvent {
+                        button: gpui_kit::MouseButton::Left,
+                        position: dropped,
+                        click_count: 1,
+                        ..Default::default()
+                    }
+                    .to_platform_input(),
+                    cx,
+                );
+                window.render_frame(cx);
+                assert!(
+                    handle.scroll().offset().y < px(0.),
+                    "dragging the thumb down scrolls the {} list",
+                    if recent { "Recent" } else { "Grouped" }
+                );
+            })
+            .unwrap();
+        }
+    }
 }
 
 mod slow_scroll {
