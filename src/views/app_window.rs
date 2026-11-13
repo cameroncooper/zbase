@@ -80,7 +80,9 @@ use crate::{
         select::{SelectChanged, StyledSelect},
         selectable_text::SelectableText,
         shell_border, shell_border_strong,
-        sidebar::{Sidebar, SidebarChrome, SidebarHandles, SidebarHost, SidebarMenu},
+        sidebar::{
+            Sidebar, SidebarChrome, SidebarHandles, SidebarHost, SidebarMenu, SidebarRowHost,
+        },
         subtle_surface, text_primary, text_secondary, tint, with_theme, with_window_active,
     },
 };
@@ -614,13 +616,46 @@ impl Render for CachedSidebarView {
     }
 }
 
-impl SidebarHost for CachedSidebarView {
+impl SidebarRowHost for CachedSidebarView {
+    fn sidebar_hide_hover_tooltip(&mut self, cx: &mut Context<Self>) {
+        let owner = self.owner.clone();
+        cx.defer(move |cx| {
+            let _ = owner.update(cx, |app_window, cx| {
+                app_window.clear_sidebar_hover_tooltip(cx);
+            });
+        });
+    }
+
+    fn sidebar_navigate_to(&mut self, route: Route, window: &mut Window, cx: &mut Context<Self>) {
+        let owner = self.owner.clone();
+        window.defer(cx, move |window, cx| {
+            let _ = owner.update(cx, |app_window, cx| {
+                app_window.navigate_to(route, window, cx);
+            });
+        });
+    }
+
+    fn sidebar_set_row_hovered(&mut self, row_id: String, hovered: bool, cx: &mut Context<Self>) {
+        if hovered {
+            if self.hovered_row.as_ref() != Some(&row_id) {
+                self.hovered_row = Some(row_id);
+                cx.notify();
+            }
+        } else if self.hovered_row.as_ref() == Some(&row_id) {
+            self.hovered_row = None;
+            cx.notify();
+        }
+    }
+
     fn sidebar_open_conversation_team(&mut self, route: Route, cx: &mut Context<Self>) {
         let owner = self.owner.clone();
         cx.defer(move |cx| {
             let _ = owner.update(cx, |this, cx| this.open_conversation_team(&route, cx));
         });
     }
+}
+
+impl SidebarHost for CachedSidebarView {
     fn sidebar_open_team_details(
         &mut self,
         team: crate::domain::conversation::ConversationGroup,
@@ -719,15 +754,6 @@ impl SidebarHost for CachedSidebarView {
         });
     }
 
-    fn sidebar_hide_hover_tooltip(&mut self, cx: &mut Context<Self>) {
-        let owner = self.owner.clone();
-        cx.defer(move |cx| {
-            let _ = owner.update(cx, |app_window, cx| {
-                app_window.clear_sidebar_hover_tooltip(cx);
-            });
-        });
-    }
-
     fn sidebar_toggle_section(&mut self, section_id: SidebarSectionId, cx: &mut Context<Self>) {
         let owner = self.owner.clone();
         cx.defer(move |cx| {
@@ -760,15 +786,6 @@ impl SidebarHost for CachedSidebarView {
         });
     }
 
-    fn sidebar_navigate_to(&mut self, route: Route, window: &mut Window, cx: &mut Context<Self>) {
-        let owner = self.owner.clone();
-        window.defer(cx, move |window, cx| {
-            let _ = owner.update(cx, |app_window, cx| {
-                app_window.navigate_to(route, window, cx);
-            });
-        });
-    }
-
     fn sidebar_navigate_history(
         &mut self,
         forward: bool,
@@ -787,27 +804,28 @@ impl SidebarHost for CachedSidebarView {
         });
     }
 
-    fn sidebar_set_row_hovered(&mut self, row_id: String, hovered: bool, cx: &mut Context<Self>) {
-        if hovered {
-            if self.hovered_row.as_ref() != Some(&row_id) {
-                self.hovered_row = Some(row_id);
-                cx.notify();
-            }
-        } else if self.hovered_row.as_ref() == Some(&row_id) {
-            self.hovered_row = None;
-            cx.notify();
-        }
-    }
-
     fn sidebar_hovered_row(&self) -> Option<&str> {
         self.hovered_row.as_deref()
     }
 }
 
-impl SidebarHost for AppWindow {
+impl SidebarRowHost for AppWindow {
+    fn sidebar_hide_hover_tooltip(&mut self, cx: &mut Context<Self>) {
+        self.clear_sidebar_hover_tooltip(cx);
+    }
+
+    fn sidebar_navigate_to(&mut self, route: Route, window: &mut Window, cx: &mut Context<Self>) {
+        self.navigate_to(route, window, cx);
+    }
+
+    fn sidebar_set_row_hovered(&mut self, _: String, _: bool, _: &mut Context<Self>) {}
+
     fn sidebar_open_conversation_team(&mut self, route: Route, cx: &mut Context<Self>) {
         self.open_conversation_team(&route, cx);
     }
+}
+
+impl SidebarHost for AppWindow {
     fn sidebar_open_team_details(
         &mut self,
         team: crate::domain::conversation::ConversationGroup,
@@ -854,10 +872,6 @@ impl SidebarHost for AppWindow {
         self.show_sidebar_hover_tooltip(text, anchor_x, anchor_y, cx);
     }
 
-    fn sidebar_hide_hover_tooltip(&mut self, cx: &mut Context<Self>) {
-        self.clear_sidebar_hover_tooltip(cx);
-    }
-
     fn sidebar_toggle_section(&mut self, section_id: SidebarSectionId, cx: &mut Context<Self>) {
         self.toggle_sidebar_section_click(section_id, cx);
     }
@@ -875,10 +889,6 @@ impl SidebarHost for AppWindow {
         self.save_conversations_share(share);
     }
 
-    fn sidebar_navigate_to(&mut self, route: Route, window: &mut Window, cx: &mut Context<Self>) {
-        self.navigate_to(route, window, cx);
-    }
-
     fn sidebar_navigate_history(
         &mut self,
         forward: bool,
@@ -891,8 +901,6 @@ impl SidebarHost for AppWindow {
             self.navigate_back(window, cx);
         }
     }
-
-    fn sidebar_set_row_hovered(&mut self, _: String, _: bool, _: &mut Context<Self>) {}
 
     fn sidebar_hovered_row(&self) -> Option<&str> {
         None
@@ -1073,6 +1081,7 @@ impl AppWindow {
     }
 
     pub fn init(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        crate::services::status_item::set_visible(self.models.settings.show_menu_bar_icon);
         if self.perf_harness.config().autostart {
             cx.activate(true);
             window.activate_window();
@@ -6015,10 +6024,12 @@ impl AppWindow {
         flush: tokio::sync::oneshot::Receiver<()>,
     ) {
         // On macOS the window owns the Keybase connection and the Dock badge, so
-        // closing hides the app instead: unread counts keep updating and the Dock
-        // icon brings the window back without reloading conversations.
+        // closing only takes it off screen: unread counts keep updating and the
+        // Dock icon brings it back without reloading conversations. Hiding the
+        // whole app instead would make the menu bar panel unhide and activate
+        // zBase whenever it opens.
         if cfg!(target_os = "macos") {
-            cx.hide();
+            crate::app::platform::hide_window(window);
             return;
         }
         window
@@ -6948,6 +6959,22 @@ impl AppWindow {
             self.persist_settings();
             self.refresh(cx);
         }
+    }
+
+    /// Settings › Menu bar icon: adds or removes the icon at once.
+    pub(crate) fn set_show_menu_bar_icon(&mut self, show: bool, cx: &mut Context<Self>) {
+        if self.models.settings.show_menu_bar_icon == show {
+            return;
+        }
+        self.models.settings.show_menu_bar_icon = show;
+        self.persist_settings();
+        crate::services::status_item::set_visible(show);
+        if !show {
+            cx.defer(|cx| {
+                crate::views::menubar_panel::close(cx);
+            });
+        }
+        self.refresh(cx);
     }
 
     pub(crate) fn set_reduced_motion(&mut self, reduced: bool, cx: &mut Context<Self>) {
@@ -9522,6 +9549,21 @@ impl AppWindow {
         }
         self.dock_badge_count = Some(count);
         crate::app::dock_badge::set_count(count);
+        crate::services::status_item::set_unread(count);
+    }
+
+    /// What the menu bar panel shows: recent conversations, unread first.
+    pub(crate) fn menubar_panel_state(&self) -> crate::views::menubar_panel::MenubarPanelState {
+        crate::views::menubar_panel::MenubarPanelState {
+            rows: crate::models::recent_sidebar::menubar_rows(
+                &self.models.sidebar.recent_rows,
+                crate::views::menubar_panel::ROWS,
+            ),
+            avatars: self.sidebar_conversation_avatars.clone(),
+            live: self.models.sidebar.live_previews.clone(),
+            theme: self.resolved_theme,
+            text_size: self.models.settings.text_size,
+        }
     }
 
     /// Moves the View menu's check mark to the current sidebar order.

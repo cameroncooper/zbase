@@ -8,6 +8,7 @@ pub mod og_service;
 pub mod search_index;
 pub mod search_service;
 pub mod settings_store;
+pub mod status_item;
 pub mod sync_service;
 pub mod uploads_service;
 pub mod window_preferences;

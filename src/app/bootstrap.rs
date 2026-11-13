@@ -1,16 +1,18 @@
 use crate::app::assets::KbuiAssets;
 use crate::app::commands;
-use crate::app::window::{open_clicked_notification, open_main_window};
+use crate::app::window::{open_clicked_notification, open_main_window, show_main_window};
+use crate::services::status_item::StatusItemEvent;
+use crate::views::menubar_panel;
 use gpui_kit::{Menu, MenuItem, SystemMenuType};
 
 pub fn run() {
     let application = gpui_kit::application().with_assets(KbuiAssets {});
 
-    // On macOS, clicking the Dock icon to re-open an already-running app should restore a window.
-    // If we have no windows, create one.
+    // On macOS, clicking the Dock icon brings back the main window, which
+    // closing only takes off screen, or opens one if there is none.
     application.on_reopen(|cx| {
-        if cfg!(target_os = "macos") && cx.windows().is_empty() {
-            open_main_window(cx);
+        if cfg!(target_os = "macos") {
+            show_main_window(cx);
         }
     });
 
@@ -28,6 +30,22 @@ pub fn run() {
 
         super::key_bindings::install(cx);
         cx.set_menus(app_menus());
+        // Before the main window, so its first unread count reaches the icon.
+        if let Some(mut events) = crate::services::status_item::start() {
+            cx.spawn(async move |cx| {
+                while let Some(event) = events.recv().await {
+                    cx.update(|cx| match event {
+                        StatusItemEvent::Clicked { display, icon } => {
+                            menubar_panel::toggle(display, icon, cx);
+                        }
+                        StatusItemEvent::ClickedOutside => {
+                            menubar_panel::close(cx);
+                        }
+                    });
+                }
+            })
+            .detach();
+        }
         open_main_window(cx);
         if let Some(mut clicks) = crate::services::notifications_service::start() {
             cx.spawn(async move |cx| {

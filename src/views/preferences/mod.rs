@@ -184,6 +184,27 @@ impl PreferencesView {
             ),
         );
 
+        // The menu bar icon exists only on macOS.
+        let show_menu_bar_icon = settings.show_menu_bar_icon;
+        let menu_bar_row = cfg!(target_os = "macos").then(|| {
+            setting_row(
+                "Menu bar icon",
+                "Show unread messages in the menu bar, with recent conversations one click away.",
+                toggle(
+                    "preferences-menu-bar-icon",
+                    show_menu_bar_icon,
+                    app,
+                    move |this, cx| {
+                        this.set_show_menu_bar_icon(!show_menu_bar_icon, cx);
+                    },
+                ),
+            )
+        });
+        let notification_rows = notifications_row(context.notification_permission)
+            .into_iter()
+            .chain(menu_bar_row)
+            .collect::<Vec<_>>();
+
         let reduced_motion = settings.reduced_motion;
         let motion_row = setting_row(
             "Reduce motion",
@@ -231,10 +252,9 @@ impl PreferencesView {
                         "Layout",
                         vec![order_row, sidebar_row, side_panel_row],
                     ))
-                    .when_some(
-                        notifications_row(context.notification_permission),
-                        |content, row| content.child(section("Notifications", vec![row])),
-                    )
+                    .when(!notification_rows.is_empty(), |content| {
+                        content.child(section("Notifications", notification_rows))
+                    })
                     .child(section("Accessibility", vec![motion_row]))
                     .child(section(
                         "Updates",

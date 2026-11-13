@@ -1,5 +1,6 @@
 use super::{
     CompactRow, ROW_AVATAR_SIZE_PX, RowActivity, RowColors, RowLook, Sidebar, SidebarHost,
+    SidebarRowHost,
     preview_row::{PREVIEW_AVATAR_PX, PreviewRow, title_segments},
     team_asset, team_logo_link,
 };
@@ -92,6 +93,33 @@ pub(super) fn render<H: SidebarHost>(
     super::scroll_viewport("sidebar-recent-bounce", scroll, list, reduced_motion)
 }
 
+/// Rows in the Previews style, for the menu bar panel. None reads as the open
+/// conversation: Settings is never one.
+pub(super) fn previews<H: SidebarRowHost>(
+    rows: &[RecentSidebarRow],
+    avatars: &HashMap<String, SidebarAvatar>,
+    live: &HashMap<String, PreviewLive>,
+    hovered: Option<&str>,
+    cx: &mut Context<H>,
+) -> Vec<AnyElement> {
+    let ambiguous = ambiguous_channel_labels(rows);
+    let current = Route::Preferences;
+    rows.iter()
+        .map(|recent| {
+            let state = RowState {
+                look: RowLook::Previews {
+                    compact_time: false,
+                },
+                current: &current,
+                hovered,
+                highlighted: None,
+                live,
+            };
+            render_row(recent, &ambiguous, avatars, state, cx)
+        })
+        .collect()
+}
+
 /// What decides a row's look besides the row itself.
 struct RowState<'a> {
     look: RowLook,
@@ -102,7 +130,7 @@ struct RowState<'a> {
     live: &'a HashMap<String, PreviewLive>,
 }
 
-fn render_row<H: SidebarHost>(
+fn render_row<H: SidebarRowHost>(
     recent: &RecentSidebarRow,
     ambiguous: &HashSet<String>,
     avatars: &HashMap<String, SidebarAvatar>,

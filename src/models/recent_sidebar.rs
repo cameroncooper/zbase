@@ -139,9 +139,60 @@ pub fn build_recent_rows(
         .collect()
 }
 
+/// The menu bar panel's conversations: the most recent ones, unread first,
+/// each group keeping Recent's order.
+pub fn menubar_rows(rows: &[RecentSidebarRow], limit: usize) -> Vec<RecentSidebarRow> {
+    let (unread, read): (Vec<_>, Vec<_>) = rows.iter().partition(|recent| recent.row.is_unread());
+    unread
+        .into_iter()
+        .chain(read)
+        .take(limit)
+        .cloned()
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn menubar_lists_unread_first_then_recent_up_to_the_limit() {
+        let row = |label: &str, unread_count: u32, muted: bool| RecentSidebarRow {
+            row: SidebarRow {
+                label: label.into(),
+                team: None,
+                unread_count,
+                mention_count: 0,
+                route: crate::domain::route::Route::Channel {
+                    workspace_id: WorkspaceId::new("ws"),
+                    channel_id: crate::domain::ids::ChannelId::new(label),
+                },
+                preview: None,
+                muted,
+            },
+            secondary: String::new(),
+            is_channel: true,
+        };
+        // Recent's order: newest activity first.
+        let rows = [
+            row("newest", 0, false),
+            row("unread", 2, false),
+            row("muted", 5, true),
+            row("older", 0, false),
+            row("older-unread", 1, false),
+            row("oldest", 0, false),
+        ];
+        let labels = |rows: Vec<RecentSidebarRow>| {
+            rows.into_iter()
+                .map(|recent| recent.row.label)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            labels(menubar_rows(&rows, 4)),
+            ["unread", "older-unread", "newest", "muted"]
+        );
+        assert_eq!(labels(menubar_rows(&rows[..1], 4)), ["newest"]);
+    }
     use crate::domain::{
         conversation::{ConversationGroup, ConversationTeamType},
         ids::ConversationId,

@@ -3,7 +3,7 @@
 //! now: typing, a draft, a failed send) and the unread badge below. Selection,
 //! hover and unread use the compact rows' `RowColors` and `RowActivity`, so
 //! both styles read alike.
-use super::{RowActivity, RowColors, SidebarHost};
+use super::{RowActivity, RowColors, SidebarRowHost};
 use crate::views::typography;
 use crate::{
     domain::route::Route,
@@ -46,7 +46,7 @@ pub(super) struct PreviewRow<'a> {
 }
 
 impl PreviewRow<'_> {
-    pub fn render<H: SidebarHost>(self, cx: &mut Context<H>) -> AnyElement {
+    pub fn render<H: SidebarRowHost>(self, cx: &mut Context<H>) -> AnyElement {
         let Self {
             row,
             id,

@@ -262,7 +262,7 @@ pub(super) struct CompactRow<'a> {
 }
 
 impl CompactRow<'_> {
-    pub fn render<H: SidebarHost>(self, cx: &mut Context<H>) -> AnyElement {
+    pub fn render<H: SidebarRowHost>(self, cx: &mut Context<H>) -> AnyElement {
         let Self {
             id,
             row,
@@ -426,8 +426,35 @@ impl ToolbarButton {
 #[derive(Default)]
 pub struct Sidebar;
 
-pub trait SidebarHost: Sized + 'static {
+/// Conversation rows as the Previews style draws them, for the menu bar panel.
+pub fn preview_rows<H: SidebarRowHost>(
+    rows: &[crate::models::recent_sidebar::RecentSidebarRow],
+    avatars: &HashMap<String, SidebarAvatar>,
+    live: &HashMap<String, crate::models::sidebar_preview::PreviewLive>,
+    hovered: Option<&str>,
+    cx: &mut Context<H>,
+) -> Vec<AnyElement> {
+    recent::previews(rows, avatars, live, hovered, cx)
+}
+
+/// Height of one Previews row at the current sidebar text size.
+pub fn preview_row_height_px() -> f32 {
+    typography::sidebar_px(preview_row::PREVIEW_ROW_HEIGHT_PX)
+}
+
+/// What a conversation row asks of whoever shows it: the sidebar, or the menu
+/// bar panel.
+pub trait SidebarRowHost: Sized + 'static {
+    fn sidebar_hide_hover_tooltip(&mut self, cx: &mut Context<Self>);
+    fn sidebar_navigate_to(&mut self, route: Route, window: &mut Window, cx: &mut Context<Self>);
+    /// Marks `row_id` hovered, or unhovered. Leaving a row clears the hover only
+    /// if it is still that row's: moving down, the next row's enter arrives first.
+    fn sidebar_set_row_hovered(&mut self, row_id: String, hovered: bool, cx: &mut Context<Self>);
+    /// A channel row's team logo was clicked: show its team's details.
     fn sidebar_open_conversation_team(&mut self, route: Route, cx: &mut Context<Self>);
+}
+
+pub trait SidebarHost: SidebarRowHost {
     fn sidebar_open_team_details(
         &mut self,
         team: crate::domain::conversation::ConversationGroup,
@@ -456,7 +483,6 @@ pub trait SidebarHost: Sized + 'static {
         anchor_y: f32,
         cx: &mut Context<Self>,
     );
-    fn sidebar_hide_hover_tooltip(&mut self, cx: &mut Context<Self>);
     fn sidebar_toggle_section(&mut self, section_id: SidebarSectionId, cx: &mut Context<Self>);
     /// Persists the share of Grouped mode's list the conversations take;
     /// `None` sizes them automatically. Does nothing when it is unchanged.
@@ -467,16 +493,12 @@ pub trait SidebarHost: Sized + 'static {
         target_id: SidebarSectionId,
         cx: &mut Context<Self>,
     );
-    fn sidebar_navigate_to(&mut self, route: Route, window: &mut Window, cx: &mut Context<Self>);
     fn sidebar_navigate_history(
         &mut self,
         forward: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     );
-    /// Marks `row_id` hovered, or unhovered. Leaving a row clears the hover only
-    /// if it is still that row's: moving down, the next row's enter arrives first.
-    fn sidebar_set_row_hovered(&mut self, row_id: String, hovered: bool, cx: &mut Context<Self>);
     fn sidebar_hovered_row(&self) -> Option<&str>;
 }
 
@@ -1091,7 +1113,7 @@ impl Sidebar {
 }
 
 /// Keep logo actions separate from the surrounding conversation row.
-fn team_logo_link<H: SidebarHost>(
+fn team_logo_link<H: SidebarRowHost>(
     logo: AnyElement,
     row: &SidebarRow,
     id: &str,

@@ -6,6 +6,7 @@ use crate::{
         },
         channel_details::NotificationLevel,
         conversation::ConversationSummary,
+        route::Route,
     },
     models::{
         AppModels,
@@ -28,8 +29,8 @@ use crate::{
     },
 };
 use gpui_kit::{
-    AnyWindowHandle, App, AppContext, Bounds, Focusable, Global, TitlebarOptions, WeakEntity,
-    WindowBackgroundAppearance, WindowBounds, WindowOptions, point, px, size,
+    AnyWindowHandle, App, AppContext, Bounds, Context, Focusable, Global, TitlebarOptions,
+    WeakEntity, Window, WindowBackgroundAppearance, WindowBounds, WindowOptions, point, px, size,
 };
 use std::env;
 use std::sync::Arc;
@@ -254,9 +255,19 @@ pub struct MainWindow {
 
 impl Global for MainWindow {}
 
-/// Brings zBase forward on the message a clicked banner points at, reopening
-/// the main window if it was closed.
-pub fn open_clicked_notification(click: ClickedNotification, cx: &mut App) {
+/// The main window's view, while it is open.
+pub fn main_window_view(cx: &App) -> Option<WeakEntity<AppWindow>> {
+    cx.try_global::<MainWindow>()
+        .filter(|main| main.view.upgrade().is_some() && cx.windows().contains(&main.handle))
+        .map(|main| main.view.clone())
+}
+
+/// Brings zBase forward with its main window active, reopening it if it was
+/// closed, and updates its view.
+fn update_main_window_in_front(
+    cx: &mut App,
+    update: impl FnOnce(&mut AppWindow, &mut Window, &mut Context<AppWindow>),
+) {
     cx.activate(true);
     let main = cx
         .try_global::<MainWindow>()
@@ -265,9 +276,35 @@ pub fn open_clicked_notification(click: ClickedNotification, cx: &mut App) {
         .unwrap_or_else(|| open_main_window(cx));
     let _ = main.handle.update(cx, |_, window, cx| {
         window.activate_window();
-        main.view.update(cx, |this, cx| {
-            this.open_message(&click.conversation_id, click.message_id, window, cx);
-        })
+        main.view.update(cx, |this, cx| update(this, window, cx))
+    });
+}
+
+/// Brings zBase forward on the message a clicked banner points at, reopening
+/// the main window if it was closed.
+pub fn open_clicked_notification(click: ClickedNotification, cx: &mut App) {
+    update_main_window_in_front(cx, |this, window, cx| {
+        this.open_message(&click.conversation_id, click.message_id, window, cx);
+    });
+}
+
+/// Brings zBase forward as it was.
+pub fn show_main_window(cx: &mut App) {
+    update_main_window_in_front(cx, |_, _, _| {});
+}
+
+/// Brings zBase forward on the team details of a channel whose logo was
+/// clicked in the menu bar panel.
+pub fn open_conversation_team(route: Route, cx: &mut App) {
+    update_main_window_in_front(cx, |this, _, cx| {
+        this.open_conversation_team(&route, cx);
+    });
+}
+
+/// Brings zBase forward on a conversation picked in the menu bar panel.
+pub fn open_route(route: Route, cx: &mut App) {
+    update_main_window_in_front(cx, |this, window, cx| {
+        this.navigate_to(route, window, cx);
     });
 }
 

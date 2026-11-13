@@ -38,6 +38,9 @@ pub struct SettingsModel {
     pub density: Density,
     pub reduced_motion: bool,
     pub show_right_pane: bool,
+    /// The menu bar icon with the unread count and recent conversations;
+    /// macOS only, off until turned on in Settings.
+    pub show_menu_bar_icon: bool,
     pub sidebar_style: SidebarStyle,
     /// Whether people appear by profile name or by username, everywhere.
     pub name_style: NameStyle,
@@ -63,6 +66,7 @@ impl Default for SettingsModel {
             density: Density::Comfortable,
             reduced_motion: false,
             show_right_pane: true,
+            show_menu_bar_icon: false,
             sidebar_style: SidebarStyle::Compact,
             name_style: NameStyle::FullName,
             emoji_skin_tone: None,

@@ -13,6 +13,7 @@ pub mod input;
 #[cfg(test)]
 mod kit_tests;
 pub mod main_panel;
+pub mod menubar_panel;
 pub mod overlays;
 mod pane_window;
 pub mod popup_menu;

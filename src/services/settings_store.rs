@@ -197,6 +197,9 @@ fn parse_settings(raw: &str) -> SettingsModel {
             "show_right_pane" => {
                 settings.show_right_pane = value != "false";
             }
+            "show_menu_bar_icon" => {
+                settings.show_menu_bar_icon = value == "true";
+            }
             "sidebar_style" => {
                 settings.sidebar_style = match value {
                     "previews" => SidebarStyle::Previews,
@@ -234,11 +237,12 @@ fn parse_settings(raw: &str) -> SettingsModel {
 
 fn serialize_settings(settings: &SettingsModel) -> String {
     let mut content = format!(
-        "theme={}\ndensity={}\nreduced_motion={}\nshow_right_pane={}\nsidebar_style={}\nname_style={}\n",
+        "theme={}\ndensity={}\nreduced_motion={}\nshow_right_pane={}\nshow_menu_bar_icon={}\nsidebar_style={}\nname_style={}\n",
         theme_label(&settings.theme_mode),
         density_label(&settings.density),
         settings.reduced_motion,
         settings.show_right_pane,
+        settings.show_menu_bar_icon,
         match settings.sidebar_style {
             SidebarStyle::Compact => "compact",
             SidebarStyle::Previews => "previews",
@@ -417,6 +421,18 @@ mod tests {
             parse_settings("theme=dark\n").sidebar_style,
             SidebarStyle::Compact
         );
+    }
+
+    #[test]
+    fn menu_bar_icon_round_trips_and_is_off_until_turned_on() {
+        let mut settings = SettingsModel::default();
+        assert!(!settings.show_menu_bar_icon);
+        settings.show_menu_bar_icon = true;
+        let serialized = serialize_settings(&settings);
+        assert!(serialized.contains("show_menu_bar_icon=true\n"));
+        assert!(parse_settings(&serialized).show_menu_bar_icon);
+        // Settings saved before the option existed keep the icon off.
+        assert!(!parse_settings("theme=dark\n").show_menu_bar_icon);
     }
 
     #[test]
