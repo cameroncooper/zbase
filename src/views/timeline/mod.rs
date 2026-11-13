@@ -48,7 +48,7 @@ use gpui_kit::{
     AnyElement, Bounds, Context, Entity, FontWeight, ImageSource, InteractiveElement, IntoElement,
     LayoutId, ListState, ObjectFit, ParentElement, Pixels, RenderImage, SharedString,
     StatefulInteractiveElement, Styled, StyledImage, Window, canvas, deferred, div, img, list, px,
-    relative, rgb,
+    relative, rgb, svg,
 };
 pub(crate) use reply_context::message_excerpt;
 use reply_context::{ReplyContext, cached_reply_context};
@@ -2047,10 +2047,58 @@ impl TimelineList {
                         }
 
                         if preview.is_media {
+                            let toggle_message_id = message_id.clone();
+                            let toggle_url = preview.url.clone();
+                            let toggle_collapsed =
+                                cx.listener(move |this, _: &gpui_kit::ClickEvent, _, cx| {
+                                    this.toggle_link_preview_collapsed(
+                                        &toggle_message_id,
+                                        &toggle_url,
+                                        cx,
+                                    );
+                                    cx.stop_propagation();
+                                });
+                            if preview.collapsed {
+                                let label = if is_giphy {
+                                    "GIPHY".to_string()
+                                } else {
+                                    preview.site.clone().unwrap_or_else(|| "media".to_string())
+                                };
+                                return div()
+                                    .id(element_id)
+                                    .on_click(toggle_collapsed)
+                                    .on_mouse_move(cx.listener(
+                                        move |this, _: &gpui_kit::MouseMoveEvent, _, cx| {
+                                            this.clear_reaction_hover_tooltip(cx);
+                                            this.set_hovered_message(
+                                                message_id.clone(),
+                                                is_thread,
+                                                cx,
+                                            );
+                                            cx.stop_propagation();
+                                        },
+                                    ))
+                                    .cursor(gpui_kit::CursorStyle::PointingHand)
+                                    .flex()
+                                    .items_center()
+                                    .gap_1()
+                                    .text_size(typography::caption())
+                                    .text_color(rgb(text_secondary()))
+                                    .child(media_disclosure_icon(true))
+                                    .child(label)
+                                    .into_any_element();
+                            }
+                            let collapse_group = SharedString::from(format!(
+                                "timeline-link-preview-media-{message_key}-{index}"
+                            ));
+                            let collapse_button_id = SharedString::from(format!(
+                                "timeline-link-preview-collapse-{message_key}-{index}"
+                            ));
+                            // A GIPHY link without a thumbnail is still downloading its GIF.
                             let media_source = preview
                                 .thumbnail_asset
                                 .clone()
-                                .unwrap_or_else(|| preview.url.clone());
+                                .or_else(|| (!is_giphy).then(|| preview.url.clone()));
                             let (media_width, media_height) = Self::media_frame_size(
                                 preview.media_width,
                                 preview.media_height,
@@ -2059,6 +2107,7 @@ impl TimelineList {
                             );
                             return div()
                                 .id(element_id)
+                                .group(collapse_group.clone())
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     this.open_url_or_deep_link(&url, window, cx);
                                 }))
@@ -2096,8 +2145,9 @@ impl TimelineList {
                                             .flex_shrink_0()
                                             .min_w(px(16.))
                                             .min_h(px(16.))
-                                    } else {
-                                        img(SharedString::from(media_source))
+                                            .into_any_element()
+                                    } else if let Some(media_source) = media_source {
+                                        img(crate::views::link_preview_image_source(&media_source))
                                             .id(image_element_id.clone())
                                             .w(px(media_width))
                                             .h(px(media_height))
@@ -2119,6 +2169,14 @@ impl TimelineList {
                                                         .into_any_element()
                                                 }
                                             })
+                                            .into_any_element()
+                                    } else {
+                                        div()
+                                            .w(px(media_width))
+                                            .h(px(media_height))
+                                            .rounded_md()
+                                            .bg(subtle_surface())
+                                            .into_any_element()
                                     }
                                 })
                                 .when(preview.is_video, |container| {
@@ -2149,20 +2207,39 @@ impl TimelineList {
                                         )
                                     }
                                 })
+                                .child(
+                                    div()
+                                        .id(collapse_button_id)
+                                        .absolute()
+                                        .top_1()
+                                        .right_1()
+                                        .size(px(22.))
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .rounded_sm()
+                                        .bg(glass_surface_dark())
+                                        .border_1()
+                                        .border_color(shell_border())
+                                        .opacity(0.)
+                                        .group_hover(collapse_group, |style| style.opacity(1.))
+                                        .cursor(gpui_kit::CursorStyle::PointingHand)
+                                        .tooltip(crate::views::tooltip::TextTooltip::single_line(
+                                            "Collapse".to_string(),
+                                        ))
+                                        .on_click(toggle_collapsed)
+                                        .child(media_disclosure_icon(false)),
+                                )
                                 .into_any_element();
                         }
 
                         let site = preview.site.clone().unwrap_or_else(|| "link".to_string());
-                        let has_title = preview.title.is_some();
-                        let title = if is_giphy {
-                            preview
-                                .title
-                                .clone()
-                                .filter(|value| !value.trim().is_empty())
-                                .unwrap_or_else(|| "GIPHY".to_string())
-                        } else {
-                            preview.title.unwrap_or_else(|| preview.url.clone())
-                        };
+                        // The message already shows the URL, so a card without a title has none.
+                        let title = preview
+                            .title
+                            .clone()
+                            .filter(|value| !value.trim().is_empty())
+                            .or_else(|| is_giphy.then(|| "GIPHY".to_string()));
                         let thumbnail = preview.thumbnail_asset.clone();
                         div()
                             .id(element_id)
@@ -2190,18 +2267,12 @@ impl TimelineList {
                                     .text_color(rgb(text_secondary()))
                                     .child(site),
                             )
-                            .child(
-                                div()
-                                    .text_size(typography::body())
-                                    .text_color(rgb(text_primary()))
-                                    .child(title),
-                            )
-                            .when(has_title && !is_giphy, |container| {
+                            .when_some(title, |container, title| {
                                 container.child(
                                     div()
-                                        .text_size(typography::caption())
-                                        .text_color(rgb(super::link()))
-                                        .child(preview.url.clone()),
+                                        .text_size(typography::body())
+                                        .text_color(rgb(text_primary()))
+                                        .child(title),
                                 )
                             })
                             .when_some(thumbnail, |container, thumb_path| {
@@ -3912,6 +3983,24 @@ fn reaction_actor_names(
         [one] => Some(one.clone()),
         [rest @ .., last] => Some(format!("{} and {last}", rest.join(", "))),
     }
+}
+
+/// The chevron on a media preview: right while collapsed, down while shown.
+fn media_disclosure_icon(collapsed: bool) -> AnyElement {
+    svg()
+        .path(if collapsed {
+            "assets/icons/chevron-right.svg"
+        } else {
+            "assets/icons/chevron-down.svg"
+        })
+        .size(px(14.))
+        .flex_shrink_0()
+        .text_color(rgb(if collapsed {
+            text_secondary()
+        } else {
+            text_primary()
+        }))
+        .into_any_element()
 }
 
 fn is_emoji_only(text: &str) -> bool {

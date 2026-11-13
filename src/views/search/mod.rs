@@ -10,7 +10,7 @@ use crate::{
         search_snippet::{CleanSnippet, MentionKind, SnippetRun, clean_search_snippet},
     },
     views::{
-        accent, accent_strong,
+        accent_strong,
         app_window::{AppWindow, video_preview_cache_key},
         attachment_file_row,
         avatar::{Avatar, default_avatar_background},
@@ -632,7 +632,7 @@ fn render_link_previews(
                                 .h(px(media_height))
                                 .object_fit(ObjectFit::Contain)
                         } else {
-                            img(SharedString::from(media_source))
+                            img(crate::views::link_preview_image_source(&media_source))
                                 .id(image_element_id.clone())
                                 .w(px(media_width))
                                 .h(px(media_height))
@@ -677,16 +677,12 @@ fn render_link_previews(
                     .into_any_element();
             }
             let site = preview.site.clone().unwrap_or_else(|| "link".to_string());
-            let has_title = preview.title.is_some();
-            let title = if is_giphy {
-                preview
-                    .title
-                    .clone()
-                    .filter(|value| !value.trim().is_empty())
-                    .unwrap_or_else(|| "GIPHY".to_string())
-            } else {
-                preview.title.unwrap_or_else(|| preview.url.clone())
-            };
+            // The message already shows the URL, so a card without a title has none.
+            let title = preview
+                .title
+                .clone()
+                .filter(|value| !value.trim().is_empty())
+                .or_else(|| is_giphy.then(|| "GIPHY".to_string()));
             let thumbnail = preview.thumbnail_asset.clone();
             div()
                 .id(element_id)
@@ -709,14 +705,8 @@ fn render_link_previews(
                         .text_color(rgb(text_secondary()))
                         .child(site),
                 )
-                .child(div().text_size(typography::body()).child(title))
-                .when(has_title && !is_giphy, |container| {
-                    container.child(
-                        div()
-                            .text_size(typography::caption())
-                            .text_color(rgb(accent()))
-                            .child(preview.url.clone()),
-                    )
+                .when_some(title, |container, title| {
+                    container.child(div().text_size(typography::body()).child(title))
                 })
                 .when_some(thumbnail, |container, thumb_path| {
                     let (tw, th) = if let (Some(w), Some(h)) =

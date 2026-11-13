@@ -1,3 +1,4 @@
+use crate::domain::giphy::giphy_media_preview;
 use crate::domain::message::LinkPreview;
 use crate::services::local_store::LocalStore;
 use crate::services::local_store::paths::data_root;
@@ -8,6 +9,8 @@ use std::sync::{Arc, mpsc::Sender};
 const STREAM_CHUNK_SIZE: usize = 16 * 1024;
 const MAX_HEAD_BYTES: usize = 1024 * 1024;
 const MAX_IMAGE_BYTES: usize = 5 * 1024 * 1024;
+/// GIPHY GIFs are the content itself rather than a thumbnail, and run larger.
+const MAX_GIPHY_BYTES: usize = 15 * 1024 * 1024;
 const FETCH_TIMEOUT_SECS: u64 = 10;
 const MAX_CONCURRENT_FETCHES: usize = 4;
 
@@ -44,16 +47,22 @@ impl OgService {
         if self.cache.contains_key(&key) {
             return;
         }
+        let is_giphy = giphy_media_preview(&key).is_some();
         if let Ok(Some(mut preview)) = self.local_store.get_og_preview(&key) {
-            if let Some(ref thumb) = preview.thumbnail_asset
-                && !PathBuf::from(thumb).exists()
-            {
+            let thumbnail_exists = preview
+                .thumbnail_asset
+                .as_ref()
+                .is_some_and(|thumb| PathBuf::from(thumb).exists());
+            if !thumbnail_exists {
                 preview.thumbnail_asset = None;
                 preview.media_width = None;
                 preview.media_height = None;
             }
-            self.cache.insert(key, Some(preview));
-            return;
+            // Earlier versions cached GIPHY's HTML card for media links; fetch the GIF.
+            if !is_giphy || (preview.is_media && thumbnail_exists) {
+                self.cache.insert(key, Some(preview));
+                return;
+            }
         }
         if self.pending >= MAX_CONCURRENT_FETCHES {
             return;
@@ -85,6 +94,9 @@ fn fetch_og_preview(url: &str) -> Option<LinkPreview> {
 }
 
 async fn fetch_og_preview_async(url: &str) -> Option<LinkPreview> {
+    if let Some(giphy) = giphy_media_preview(url) {
+        return fetch_giphy_preview(giphy).await;
+    }
     let normalized = if url.contains("://") {
         url.to_string()
     } else {
@@ -162,6 +174,7 @@ async fn fetch_og_preview_async(url: &str) -> Option<LinkPreview> {
         is_video: false,
         github_pr: None,
         chat_message: None,
+        collapsed: false,
     })
 }
 
@@ -208,9 +221,33 @@ fn image_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
     reader.into_dimensions().ok()
 }
 
+/// Downloads the GIF of a GIPHY media link; the UI shows images from disk.
+async fn fetch_giphy_preview(mut preview: LinkPreview) -> Option<LinkPreview> {
+    let gif_url = preview.thumbnail_asset.take()?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(FETCH_TIMEOUT_SECS))
+        .build()
+        .ok()?;
+    let (path, dimensions) = download_image(&client, &gif_url, MAX_GIPHY_BYTES).await?;
+    preview.thumbnail_asset = Some(path);
+    if let Some((width, height)) = dimensions {
+        preview.media_width = preview.media_width.or(Some(width));
+        preview.media_height = preview.media_height.or(Some(height));
+    }
+    Some(preview)
+}
+
 async fn download_thumbnail(
     client: &reqwest::Client,
     url: &str,
+) -> Option<(String, Option<(u32, u32)>)> {
+    download_image(client, url, MAX_IMAGE_BYTES).await
+}
+
+async fn download_image(
+    client: &reqwest::Client,
+    url: &str,
+    max_bytes: usize,
 ) -> Option<(String, Option<(u32, u32)>)> {
     let cache_path = thumbnail_cache_path(url);
     if cache_path.exists() {
@@ -222,7 +259,7 @@ async fn download_thumbnail(
         return None;
     }
     let bytes = response.bytes().await.ok()?;
-    if bytes.is_empty() || bytes.len() > MAX_IMAGE_BYTES {
+    if bytes.is_empty() || bytes.len() > max_bytes {
         return None;
     }
     let dims = image_dimensions(bytes.as_ref());

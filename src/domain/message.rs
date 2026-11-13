@@ -21,6 +21,8 @@ pub struct LinkPreview {
     pub github_pr: Option<GithubPrPreview>,
     /// The linked message for `keybase://chat/...` links. Never persisted.
     pub chat_message: Option<ChatMessagePreview>,
+    /// The viewer folded this media preview away. Never persisted.
+    pub collapsed: bool,
 }
 
 /// A quote of the message a `keybase://chat/...` link points to.

@@ -950,7 +950,7 @@ fn render_link_previews(
                                 .min_w(px(16.))
                                 .min_h(px(16.))
                         } else {
-                            img(SharedString::from(media_source))
+                            img(crate::views::link_preview_image_source(&media_source))
                                 .id(image_element_id.clone())
                                 .size_full()
                                 .rounded_md()
@@ -999,16 +999,12 @@ fn render_link_previews(
             }
 
             let site = preview.site.clone().unwrap_or_else(|| "link".to_string());
-            let has_title = preview.title.is_some();
-            let title = if is_giphy {
-                preview
-                    .title
-                    .clone()
-                    .filter(|value| !value.trim().is_empty())
-                    .unwrap_or_else(|| "GIPHY".to_string())
-            } else {
-                preview.title.unwrap_or_else(|| preview.url.clone())
-            };
+            // The message already shows the URL, so a card without a title has none.
+            let title = preview
+                .title
+                .clone()
+                .filter(|value| !value.trim().is_empty())
+                .or_else(|| is_giphy.then(|| "GIPHY".to_string()));
             let thumbnail = preview.thumbnail_asset.clone();
             div()
                 .id(element_id)
@@ -1033,18 +1029,12 @@ fn render_link_previews(
                         .text_color(rgb(text_secondary()))
                         .child(site),
                 )
-                .child(
-                    div()
-                        .text_size(typography::body())
-                        .text_color(rgb(text_primary()))
-                        .child(title),
-                )
-                .when(has_title && !is_giphy, |container| {
+                .when_some(title, |container, title| {
                     container.child(
                         div()
-                            .text_size(typography::caption())
-                            .text_color(rgb(crate::views::link()))
-                            .child(preview.url.clone()),
+                            .text_size(typography::body())
+                            .text_color(rgb(text_primary()))
+                            .child(title),
                     )
                 })
                 .when_some(thumbnail, |container, thumb_path| {
