@@ -1,0 +1,19 @@
+## What's Changed
+* Open team details from team logos and join channels by @cameroncooper in https://github.com/cameroncooper/zbase/pull/70
+* Build optimized macOS apps for PR downloads by @cameroncooper in https://github.com/cameroncooper/zbase/pull/84
+* Support automatic version bumps when publishing GitHub releases by @cameroncooper in https://github.com/cameroncooper/zbase/pull/68
+* Request macOS badge notification permission by @emlowe in https://github.com/cameroncooper/zbase/pull/81
+* Reuse Rust dependencies across releases and enable sccache by @cameroncooper in https://github.com/cameroncooper/zbase/pull/82
+* Show a quote of the linked message under keybase://chat links by @greimela in https://github.com/cameroncooper/zbase/pull/85
+* Rework composer autocomplete: fix Up-to-edit, scrolling, lag and positioning by @greimela in https://github.com/cameroncooper/zbase/pull/88
+* Fix the add-reaction tile next to existing reactions by @greimela in https://github.com/cameroncooper/zbase/pull/89
+* Fix cursor movement and line keys in the composer by @AmineKhaldi in https://github.com/cameroncooper/zbase/pull/87
+* Start the Keybase service when reconnecting and offer Reconnect once that fails by @AmineKhaldi in https://github.com/cameroncooper/zbase/pull/69
+* Improve search relevance and explain username matches by @cameroncooper in https://github.com/cameroncooper/zbase/pull/91
+* Preview linked GitHub comments inline by @cameroncooper in https://github.com/cameroncooper/zbase/pull/90
+* Add a draggable scrollbar to the sidebar lists by @AmineKhaldi in https://github.com/cameroncooper/zbase/pull/71
+* Add a menu bar icon with a panel of recent conversations by @AmineKhaldi in https://github.com/cameroncooper/zbase/pull/83
+* Show GIPHY links as the GIF, collapsible media previews, leaner link cards by @greimela in https://github.com/cameroncooper/zbase/pull/92
+
+
+**Full Changelog**: https://github.com/cameroncooper/zbase/compare/v1.0.23...v1.0.24
