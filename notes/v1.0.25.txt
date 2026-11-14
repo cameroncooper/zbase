@@ -1,0 +1,6 @@
+## What's Changed
+* Add a /giphy picker that spends few GIPHY API calls by @greimela in https://github.com/cameroncooper/zbase/pull/93
+* Add Keybase bots and !command completion in channels and DMs by @cameroncooper in https://github.com/cameroncooper/zbase/pull/94
+
+
+**Full Changelog**: https://github.com/cameroncooper/zbase/compare/v1.0.24...v1.0.25
