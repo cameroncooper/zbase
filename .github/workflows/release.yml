@@ -61,6 +61,8 @@ jobs:
       SPARKLE_DIR: ${{ github.workspace }}/dist/sparkle
       SPARKLE_PUBLIC_KEY: ${{ vars.SPARKLE_PUBLIC_KEY }}
       ZBASE_OFFICIAL_RELEASE: '1'
+      # Built in for the /giphy picker; without it the picker says search isn't set up.
+      ZBASE_GIPHY_API_KEY: ${{ secrets.GIPHY_API_KEY }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -200,6 +202,8 @@ jobs:
     with:
       artifact-name: windows-release
       ref: ${{ needs.prepare.outputs.ref }}
+    secrets:
+      GIPHY_API_KEY: ${{ secrets.GIPHY_API_KEY }}
 
   attach:
     needs: [prepare, build]

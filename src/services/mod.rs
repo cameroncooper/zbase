@@ -1,5 +1,6 @@
 pub mod backends;
 pub mod draft_store;
+pub mod giphy_service;
 pub mod github_pr_service;
 pub mod local_store;
 pub mod media_service;

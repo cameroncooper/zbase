@@ -7,6 +7,7 @@ mod updates;
 use super::pane_window::{PaneWindowSizing, left_shift_for_width};
 use crate::domain::desktop_notification::{Attention, DesktopNotification};
 use crate::models::conversation_model::AvatarParticipant;
+use crate::services::giphy_service::GiphyService;
 use crate::services::github_pr_service::{GithubPrFetchResult, GithubPrService};
 use crate::services::notifications_service::{self, ClickedNotification};
 use crate::services::og_service::{OgFetchResult, OgService};
@@ -136,6 +137,33 @@ const INLINE_AUTOCOMPLETE_MAX_RESULTS: usize = 50;
 enum InputAutocompleteTarget {
     Composer,
     Thread,
+}
+
+impl InputAutocompleteTarget {
+    fn composer_target(self) -> crate::views::composer::ComposerTarget {
+        match self {
+            Self::Composer => crate::views::composer::ComposerTarget::Conversation,
+            Self::Thread => crate::views::composer::ComposerTarget::Thread,
+        }
+    }
+
+    fn from_composer_target(target: crate::views::composer::ComposerTarget) -> Self {
+        match target {
+            crate::views::composer::ComposerTarget::Conversation => Self::Composer,
+            crate::views::composer::ComposerTarget::Thread => Self::Thread,
+        }
+    }
+}
+
+/// Waits for typing to pause before a `/giphy` search spends an API call.
+const GIPHY_SEARCH_DELAY: Duration = Duration::from_millis(700);
+
+/// The open `/giphy` picker: which composer, its query, the highlighted GIF.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct GiphyPicker {
+    target: InputAutocompleteTarget,
+    query: String,
+    selected: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -385,6 +413,12 @@ pub struct AppWindow {
     quick_switcher_indexing_messages_indexed: u64,
     last_text_input_activity: Option<Instant>,
     dismissed_composer_autocomplete: Option<AutocompleteDismissSignature>,
+    giphy: GiphyService,
+    giphy_picker: Option<GiphyPicker>,
+    /// After Escape the picker stays closed until the query changes.
+    giphy_dismissed: Option<(InputAutocompleteTarget, String)>,
+    /// When the picker next redraws to offer a retry after a refused search.
+    giphy_retry_notice_at: Option<Instant>,
     dismissed_thread_autocomplete: Option<AutocompleteDismissSignature>,
     /// Keep the highlighted row of each inline autocomplete list in view.
     composer_autocomplete_scroll: ScrollHandle,
@@ -1070,6 +1104,10 @@ impl AppWindow {
             quick_switcher_indexing_messages_indexed: 0,
             last_text_input_activity: None,
             dismissed_composer_autocomplete: None,
+            giphy: GiphyService::new(),
+            giphy_picker: None,
+            giphy_dismissed: None,
+            giphy_retry_notice_at: None,
             dismissed_thread_autocomplete: None,
             composer_autocomplete_scroll: ScrollHandle::new(),
             thread_autocomplete_scroll: ScrollHandle::new(),
@@ -1547,6 +1585,10 @@ impl AppWindow {
         }
         let mut needs_refresh = self.drain_video_decode_results();
         needs_refresh |= self.drain_og_fetch_results();
+        if self.giphy.drain() {
+            needs_refresh = true;
+            self.schedule_giphy_retry_notice(cx);
+        }
         needs_refresh |= self.drain_github_pr_results();
         needs_refresh |= self.poll_github_prs();
         let quick_switcher_typing = self.models.overlay.quick_switcher_open
@@ -2634,6 +2676,13 @@ impl AppWindow {
             let editor = self.autocomplete_editor(target).read(cx);
             (editor.text(), editor.cursor_offset())
         };
+        if self.sync_giphy_picker(target, &text, cx) {
+            if self.autocomplete_state(target).is_some() {
+                self.set_autocomplete_state(target, None);
+                cx.notify();
+            }
+            return;
+        }
         let detected = detect_autocomplete_trigger(&text, cursor);
         let detected_signature = detected
             .as_ref()
@@ -6684,6 +6733,16 @@ impl AppWindow {
     }
 
     pub(crate) fn send_composer_message(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(picker) = self.giphy_picker_for(InputAutocompleteTarget::Composer) {
+            let selected = picker.selected;
+            self.send_giphy_gif(
+                crate::views::composer::ComposerTarget::Conversation,
+                selected,
+                window,
+                cx,
+            );
+            return;
+        }
         let composer_text = self.composer_input.read(cx).text();
         self.models
             .update_composer_draft_text(composer_text.clone());
@@ -6752,6 +6811,16 @@ impl AppWindow {
     }
 
     pub(crate) fn send_thread_reply(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(picker) = self.giphy_picker_for(InputAutocompleteTarget::Thread) {
+            let selected = picker.selected;
+            self.send_giphy_gif(
+                crate::views::composer::ComposerTarget::Thread,
+                selected,
+                window,
+                cx,
+            );
+            return;
+        }
         let thread_text = self.thread_input.read(cx).text();
         self.models.update_thread_reply_draft(thread_text.clone());
         let Some(root_id) = self.models.thread_pane.root_message_id.clone() else {
@@ -6783,6 +6852,190 @@ impl AppWindow {
 
         if let Some(pending) = pending {
             self.schedule_pending_send(pending, cx);
+        }
+    }
+
+    /// Opens, updates or closes the `/giphy` picker for `target`'s text.
+    /// Returns whether the text is a `/giphy` command, which then owns the
+    /// popup slot instead of the @mention / :emoji: list.
+    fn sync_giphy_picker(
+        &mut self,
+        target: InputAutocompleteTarget,
+        text: &str,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let editing = target == InputAutocompleteTarget::Composer
+            && matches!(self.models.composer.mode, ComposerMode::Edit { .. });
+        let query = (!editing)
+            .then(|| crate::views::composer::giphy_picker::giphy_command_query(text))
+            .flatten()
+            .map(str::to_string);
+        let Some(query) = query else {
+            if self
+                .giphy_dismissed
+                .as_ref()
+                .is_some_and(|(dismissed, _)| *dismissed == target)
+            {
+                self.giphy_dismissed = None;
+            }
+            if self
+                .giphy_picker
+                .as_ref()
+                .is_some_and(|picker| picker.target == target)
+            {
+                self.giphy_picker = None;
+                cx.notify();
+            }
+            return false;
+        };
+        if self.giphy_dismissed.as_ref() == Some(&(target, query.clone())) {
+            return true;
+        }
+        self.giphy_dismissed = None;
+        if self
+            .giphy_picker
+            .as_ref()
+            .is_some_and(|picker| picker.target == target && picker.query == query)
+        {
+            return true;
+        }
+        self.giphy_picker = Some(GiphyPicker {
+            target,
+            query: query.clone(),
+            selected: 0,
+        });
+        self.autocomplete_scroll(target)
+            .set_offset(gpui_kit::point(px(0.), px(0.)));
+        let shown =
+            crate::views::composer::giphy_picker::giphy_picker_gifs(&self.giphy, &query).to_vec();
+        self.giphy.fetch_previews(&shown);
+        self.schedule_giphy_search(query, cx);
+        cx.notify();
+        true
+    }
+
+    /// Searches once the query has stayed the same for `GIPHY_SEARCH_DELAY`.
+    fn schedule_giphy_search(&mut self, query: String, cx: &mut Context<Self>) {
+        let normalized = GiphyService::normalize_query(&query);
+        if normalized.chars().count() < crate::services::giphy_service::MIN_QUERY_CHARS {
+            return;
+        }
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let mut cx = cx.clone();
+            async move {
+                cx.background_executor().timer(GIPHY_SEARCH_DELAY).await;
+                let _ = this.update(&mut cx, |this, cx| {
+                    let still_typed = this.giphy_picker.as_ref().is_some_and(|picker| {
+                        GiphyService::normalize_query(&picker.query) == normalized
+                    });
+                    if still_typed {
+                        this.giphy.search(&normalized);
+                        this.schedule_giphy_retry_notice(cx);
+                        cx.notify();
+                    }
+                });
+            }
+        })
+        .detach();
+    }
+
+    /// Searches the open picker's query again, after a refusal or failure.
+    pub(crate) fn retry_giphy_search(
+        &mut self,
+        target: crate::views::composer::ComposerTarget,
+        cx: &mut Context<Self>,
+    ) {
+        let target = InputAutocompleteTarget::from_composer_target(target);
+        let Some(query) = self
+            .giphy_picker_for(target)
+            .map(|picker| picker.query.clone())
+        else {
+            return;
+        };
+        self.giphy.search(&query);
+        self.schedule_giphy_retry_notice(cx);
+        cx.notify();
+    }
+
+    /// Redraws the picker when a refused search may run again, so it can
+    /// offer the retry.
+    fn schedule_giphy_retry_notice(&mut self, cx: &mut Context<Self>) {
+        let Some(retry_at) = self.giphy.retry_at() else {
+            return;
+        };
+        if self.giphy_retry_notice_at == Some(retry_at) {
+            return;
+        }
+        self.giphy_retry_notice_at = Some(retry_at);
+        let wait = retry_at.saturating_duration_since(Instant::now()) + Duration::from_millis(50);
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let mut cx = cx.clone();
+            async move {
+                cx.background_executor().timer(wait).await;
+                let _ = this.update(&mut cx, |this, cx| {
+                    this.giphy_retry_notice_at = None;
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+    }
+
+    fn giphy_picker_for(&self, target: InputAutocompleteTarget) -> Option<&GiphyPicker> {
+        self.giphy_picker
+            .as_ref()
+            .filter(|picker| picker.target == target)
+    }
+
+    /// Moves the highlighted GIF; returns whether the picker took the key.
+    fn move_giphy_selection(&mut self, target: InputAutocompleteTarget, direction: isize) -> bool {
+        let Some(picker) = self.giphy_picker_for(target) else {
+            return false;
+        };
+        let len =
+            crate::views::composer::giphy_picker::giphy_picker_gifs(&self.giphy, &picker.query)
+                .len();
+        if len > 0 {
+            let next = (picker.selected.min(len - 1) as isize + direction).rem_euclid(len as isize);
+            if let Some(picker) = self.giphy_picker.as_mut() {
+                picker.selected = next as usize;
+            }
+            self.autocomplete_scroll(target)
+                .scroll_to_item(next as usize);
+        }
+        true
+    }
+
+    /// Sends the GIF at `index` of the open picker, as the link the Keybase
+    /// `/giphy` command sends. With no GIF there it retries the search
+    /// instead, so Return never posts the raw `/giphy` text.
+    pub(crate) fn send_giphy_gif(
+        &mut self,
+        target: crate::views::composer::ComposerTarget,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let target = InputAutocompleteTarget::from_composer_target(target);
+        let Some(picker) = self.giphy_picker_for(target) else {
+            return;
+        };
+        let Some(gif) = crate::views::composer::giphy_picker::giphy_picker_gif(
+            &self.giphy,
+            &picker.query,
+            index,
+        )
+        .cloned() else {
+            self.retry_giphy_search(target.composer_target(), cx);
+            return;
+        };
+        self.giphy.record_sent(&gif);
+        self.giphy_picker = None;
+        self.autocomplete_editor(target)
+            .update(cx, |input, cx| input.set_text(gif.target_url.clone(), cx));
+        match target {
+            InputAutocompleteTarget::Composer => self.send_composer_message(window, cx),
+            InputAutocompleteTarget::Thread => self.send_thread_reply(window, cx),
         }
     }
 
@@ -6906,7 +7159,7 @@ impl AppWindow {
         let Some(target) = self.autocomplete_target_for_focused_input(window, cx) else {
             return;
         };
-        if self.move_autocomplete_selection(target, -1) {
+        if self.move_giphy_selection(target, -1) || self.move_autocomplete_selection(target, -1) {
             cx.stop_propagation();
             self.refresh(cx);
         } else if target == InputAutocompleteTarget::Composer
@@ -6924,7 +7177,7 @@ impl AppWindow {
         cx: &mut Context<Self>,
     ) {
         if let Some(target) = self.autocomplete_target_for_focused_input(window, cx)
-            && self.move_autocomplete_selection(target, 1)
+            && (self.move_giphy_selection(target, 1) || self.move_autocomplete_selection(target, 1))
         {
             cx.stop_propagation();
             self.refresh(cx);
@@ -9278,16 +9531,21 @@ impl AppWindow {
         target: InputAutocompleteTarget,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
+        if let Some(picker) = self.giphy_picker_for(target) {
+            return Some(crate::views::composer::giphy_picker::render_giphy_picker(
+                &self.giphy,
+                &picker.query,
+                picker.selected,
+                target.composer_target(),
+                self.autocomplete_scroll(target),
+                cx,
+            ));
+        }
         let state = self.autocomplete_state(target)?;
         if state.candidates.is_empty() {
             return None;
         }
-        let composer_target = match target {
-            InputAutocompleteTarget::Composer => {
-                crate::views::composer::ComposerTarget::Conversation
-            }
-            InputAutocompleteTarget::Thread => crate::views::composer::ComposerTarget::Thread,
-        };
+        let composer_target = target.composer_target();
         Some(render_autocomplete_popup(
             state,
             composer_target,
@@ -10098,6 +10356,14 @@ impl AppWindow {
         if self.models.overlay.emoji_picker_open {
             self.dismiss_overlays(cx);
             self.restore_chat_focus(window, cx);
+            return;
+        }
+        if let Some(target) = self.autocomplete_target_for_focused_input(window, cx)
+            && let Some(picker) = self.giphy_picker_for(target)
+        {
+            self.giphy_dismissed = Some((target, picker.query.clone()));
+            self.giphy_picker = None;
+            self.refresh(cx);
             return;
         }
         if let Some(target) = self.autocomplete_target_for_focused_input(window, cx) {
