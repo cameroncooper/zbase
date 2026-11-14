@@ -60,6 +60,8 @@ ln -s "$(brew --prefix)/opt/zbase/zBase.app" /Applications/zBase.app
 - Rich inline markdown: **bold**, *italic*, ~~strikethrough~~, ||spoilers||, `code`, code blocks, and block quotes
 - Selectable, copyable message text with styled ranges and clickable links
 - @mentions, #channel mentions, and @here/@all broadcasts
+- Keybase bots in channels, DMs, and group DMs: browse Keybase’s featured bots (including Zoom Meetings), add bots by username, and manage restricted access from Conversation Details → Bots
+- `!` command autocomplete in conversations and thread replies, with bot badges and message-sharing indicators
 - Pinned messages per conversation
 - Leave eligible team channels from the channel Details panel
 

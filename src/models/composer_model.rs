@@ -12,6 +12,11 @@ pub enum ComposerMode {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AutocompleteCandidate {
+    BotCommand {
+        text: String,
+        username: String,
+        description: String,
+    },
     MentionUser {
         username: String,
         display_name: String,
@@ -31,6 +36,7 @@ pub enum AutocompleteCandidate {
 impl AutocompleteCandidate {
     pub fn completion_text(&self) -> String {
         match self {
+            Self::BotCommand { text, .. } => format!("{text} "),
             Self::MentionUser { username, .. } => format!("@{username} "),
             Self::MentionBroadcast { keyword, .. } => format!("@{keyword} "),
             Self::Emoji { insert_text, .. } => format!("{insert_text} "),

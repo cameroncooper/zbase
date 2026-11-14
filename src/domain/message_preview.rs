@@ -200,6 +200,7 @@ mod tests {
 
     fn record(id: &str, text: &str) -> MessageRecord {
         MessageRecord {
+            bot_username: None,
             id: MessageId::new(id),
             conversation_id: ConversationId::new("c"),
             author_id: UserId::new("lena_f"),

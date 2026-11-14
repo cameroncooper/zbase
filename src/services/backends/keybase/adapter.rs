@@ -2,6 +2,7 @@ use crate::domain::message_formatting::{
     parse_code_span_end, push_plain_text_fragment, push_text_fragment, strip_quote_prefix,
 };
 mod attachment_hydration;
+mod bots;
 mod channel_membership;
 mod outbox;
 mod team_channels;
@@ -1707,12 +1708,42 @@ impl ChatBackend for KeybaseBackend {
                 });
                 Ok(Vec::new())
             }
+            RoutedBackendCommand::Bots {
+                account_id,
+                conversation,
+                request,
+                operation,
+                ..
+            } => {
+                self.ensure_listener_started();
+                let local_store = Arc::clone(&self.local_store);
+                if let Some(sender) = self.inbound_sender.clone() {
+                    task_runtime::spawn_task(TaskPriority::High, None, move || {
+                        bots::run(
+                            sender,
+                            local_store,
+                            account_id,
+                            conversation,
+                            request,
+                            operation,
+                        )
+                    });
+                }
+                Ok(Vec::new())
+            }
             RoutedBackendCommand::LoadConversationMembers { conversation, .. } => {
                 self.ensure_listener_started();
                 let Some(sender) = self.inbound_sender.clone() else {
                     return Ok(Vec::new());
                 };
                 let conversation_id = canonical_conversation_id_from_provider_ref(&conversation);
+                spawn_sync_conversation_team_roles(
+                    &sender,
+                    &self.local_store,
+                    conversation_id.clone(),
+                    conversation.clone(),
+                    true,
+                );
                 let dedupe_key = format!("load_conversation_members:{}", conversation_id.0);
                 let _ = task_runtime::spawn_task(TaskPriority::High, Some(dedupe_key), move || {
                     run_load_conversation_members(sender, conversation_id);
@@ -8284,7 +8315,12 @@ fn maybe_handle_team_role_notify(
     sender: &Sender<BackendEvent>,
     local_store: &Arc<LocalStore>,
 ) {
-    if event.method_name() != "keybase.1.NotifyTeam.teamRoleMapChanged" {
+    if !matches!(
+        event.method_name(),
+        "keybase.1.NotifyTeam.teamRoleMapChanged"
+            | "keybase.1.NotifyTeam.teamChangedByID"
+            | "keybase.1.NotifyTeam.teamChangedByName"
+    ) {
         return;
     }
     let raw_params = match event {
@@ -8295,10 +8331,20 @@ fn maybe_handle_team_role_notify(
     team_ids.sort();
     team_ids.dedup();
     if team_ids.is_empty() {
+        // Name-only and role-map version notifications have no ID. Invalidate
+        // all cached bot metadata rather than retaining obsolete privileges.
+        let _ = sender.send(BackendEvent::BotsInvalidated {
+            team_id: None,
+            except: None,
+        });
         return;
     }
 
     for team_id in team_ids {
+        let _ = sender.send(BackendEvent::BotsInvalidated {
+            team_id: Some(team_id.clone()),
+            except: None,
+        });
         let Ok(conversation_ids) = local_store.load_conversation_ids_for_team(&team_id) else {
             continue;
         };
@@ -9750,6 +9796,8 @@ fn team_role_kind_from_raw(role: i64) -> Option<TeamRoleKind> {
         0..=2 => Some(TeamRoleKind::Member),
         3 => Some(TeamRoleKind::Admin),
         4 => Some(TeamRoleKind::Owner),
+        5 => Some(TeamRoleKind::Bot),
+        6 => Some(TeamRoleKind::RestrictedBot),
         _ => None,
     }
 }
@@ -9946,6 +9994,8 @@ fn parse_team_role_raw(value: &Value) -> Option<i64> {
             "writer" | "writer_2" => Some(2),
             "reader" | "reader_1" => Some(1),
             "none" | "none_0" => Some(0),
+            "bot" | "bot_5" => Some(5),
+            "restrictedbot" | "restricted_bot" | "restrictedbot_6" => Some(6),
             _ => None,
         })
     })
@@ -10165,6 +10215,10 @@ fn parse_live_message_from_notify(event: &KeybaseNotifyEvent) -> Option<MessageR
     };
 
     Some(MessageRecord {
+        bot_username: map_get(preferred_root, "botUsername")
+            .and_then(as_str)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string),
         id: record_id,
         conversation_id,
         author_id: UserId::new(author),
@@ -13566,6 +13620,10 @@ fn parse_thread_message(
     };
 
     Some(MessageRecord {
+        bot_username: map_get(valid, "botUsername")
+            .and_then(as_str)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string),
         id: record_id,
         conversation_id: conversation_id.clone(),
         author_id: UserId::new(author),
@@ -16641,6 +16699,7 @@ mod tests {
 
     fn make_test_message(id: impl Into<String>) -> MessageRecord {
         MessageRecord {
+            bot_username: None,
             id: MessageId::new(id.into()),
             conversation_id: ConversationId::new("kb_conv:test"),
             author_id: UserId::new("alice"),

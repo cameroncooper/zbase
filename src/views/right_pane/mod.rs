@@ -87,6 +87,7 @@ impl RightPaneHost {
     )]
     pub fn render(
         &self,
+        bot_panel: Option<AnyElement>,
         navigation: &NavigationModel,
         team_details: &crate::state::state::TeamDetailsState,
         workspace: &crate::state::state::UiWorkspaceState,
@@ -115,6 +116,7 @@ impl RightPaneHost {
     ) -> AnyElement {
         let content = match navigation.right_pane {
             RightPaneMode::Hidden => div().into_any_element(),
+            RightPaneMode::Bots => bot_panel.unwrap_or_else(|| div().into_any_element()),
             RightPaneMode::Thread => ThreadPane.render(
                 thread,
                 timeline,

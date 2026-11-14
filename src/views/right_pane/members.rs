@@ -51,7 +51,7 @@ pub(super) fn member_sections<'a>(
             || member.display_name.to_lowercase().contains(&query)
             || member.user_id.0.to_lowercase().contains(&query)
     }) {
-        let section = if member.user_id.0.to_ascii_lowercase().ends_with("bot") {
+        let section = if member.is_bot {
             2
         } else if member.is_team_admin_or_owner {
             0
@@ -206,15 +206,20 @@ fn people_count(count: usize) -> String {
 /// identity marker, role.
 fn member_row(member: &ChannelMemberPreview, cx: &mut Context<AppWindow>) -> AnyElement {
     let user_id = member.user_id.clone();
+    let is_bot = member.is_bot;
     let username = member.user_id.0.as_str();
     let other_name = member.other_name();
-    let role = member
-        .is_team_admin_or_owner
-        .then_some(if member.is_team_owner {
-            "Owner"
-        } else {
-            "Admin"
-        });
+    let role = if member.is_bot {
+        Some("Bot")
+    } else {
+        member
+            .is_team_admin_or_owner
+            .then_some(if member.is_team_owner {
+                "Owner"
+            } else {
+                "Admin"
+            })
+    };
     div()
         .id(SharedString::from(format!("members-pane-row-{username}")))
         .h(px(40.))
@@ -225,8 +230,12 @@ fn member_row(member: &ChannelMemberPreview, cx: &mut Context<AppWindow>) -> Any
         .gap(px(10.))
         .cursor(CursorStyle::PointingHand)
         .hover(|style| style.bg(tint(text_primary(), 0.05)))
-        .on_click(cx.listener(move |this, _, _, cx| {
-            this.open_user_profile_card(user_id.clone(), cx);
+        .on_click(cx.listener(move |this, _, window, cx| {
+            if is_bot {
+                this.open_bots(Some(user_id.0.clone()), window, cx);
+            } else {
+                this.open_user_profile_card(user_id.clone(), cx);
+            }
         }))
         .child(member_avatar(
             "members-pane",
@@ -315,6 +324,7 @@ mod tests {
             affinity: Affinity::None,
             is_team_admin_or_owner: admin,
             is_team_owner: owner,
+            is_bot: username == "buildbot",
             availability: None,
         }
     }
@@ -336,6 +346,16 @@ mod tests {
             .collect()
     }
 
+    #[test]
+    fn bot_grouping_uses_metadata_instead_of_username_suffix() {
+        let human = member("humanbot", "Human", false, false);
+        let mut bot = member("meetings", "Meetings", false, false);
+        bot.is_bot = true;
+        let members = [human, bot];
+        let groups = names(&member_sections(&members, ""));
+        assert_eq!(groups[0], (MemberSection::Members, vec!["Human".into()]));
+        assert_eq!(groups[1], (MemberSection::Bots, vec!["Meetings".into()]));
+    }
     #[test]
     fn groups_admins_people_and_bots_with_owners_first() {
         let members = [

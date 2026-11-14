@@ -17,6 +17,11 @@ pub enum DraftKey {
 
 #[derive(Clone, Debug)]
 pub enum UiAction {
+    Bots {
+        conversation_id: ConversationId,
+        request: u64,
+        operation: crate::domain::bots::BotOperation,
+    },
     StartApp,
     LoadTeamDetails {
         team: crate::domain::conversation::ConversationGroup,

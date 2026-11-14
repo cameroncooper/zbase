@@ -19,7 +19,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-ALL_SCENES=(team-details files-media files-documents files-empty chat chat-grouped chat-previews chat-previews-grouped chat-grouped-collapsed chat-previews-live identity-menu
+ALL_SCENES=(dm-details bots-dm featured-zoom featured-zoom-review bot-add bot-add-review bot-remove bots bot-details bot-access bot-unrestricted bot-commands team-details files-media files-documents files-empty chat chat-grouped chat-previews chat-previews-grouped chat-grouped-collapsed chat-previews-live identity-menu
   order-menu chat-states details details-dropdown thread thread-empty profile preferences quick-switcher
   quick-switcher-search search search-empty dm members members-filter-empty new-chat offline
   inactive composer-format composer-autocomplete reaction-tooltip reaction-tooltip-long)

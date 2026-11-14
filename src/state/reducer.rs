@@ -99,6 +99,58 @@ fn reduce_ui_action(state: &mut UiState, action: UiAction) -> ReducerOutput {
                 ],
             }
         }
+        UiAction::Bots {
+            conversation_id,
+            request,
+            operation,
+        } => {
+            if matches!(
+                operation,
+                crate::domain::bots::BotOperation::Featured { .. }
+            ) {
+                state.backend.featured_bots.loading = true;
+                state.backend.featured_bots.request = request;
+                state.backend.featured_bots.error = None;
+                return ReducerOutput {
+                    effects: vec![Effect::Backend(BackendCommand::Bots {
+                        conversation_id,
+                        request,
+                        operation,
+                    })],
+                };
+            }
+            let bots = state
+                .backend
+                .bots
+                .entry(conversation_id.clone())
+                .or_default();
+            if bots.mutation_pending {
+                return ReducerOutput::default();
+            }
+            bots.request = request;
+            bots.invalidated = false;
+            bots.loading = true;
+            bots.mutation_pending = matches!(
+                operation,
+                crate::domain::bots::BotOperation::Add { .. }
+                    | crate::domain::bots::BotOperation::Save { .. }
+                    | crate::domain::bots::BotOperation::Remove { .. }
+            );
+            bots.error = None;
+            if bots.mutation_pending {
+                bots.failed_mutation = None;
+            }
+            if matches!(operation, crate::domain::bots::BotOperation::Lookup { .. }) {
+                bots.lookup = None;
+            }
+            ReducerOutput {
+                effects: vec![Effect::Backend(BackendCommand::Bots {
+                    conversation_id,
+                    request,
+                    operation,
+                })],
+            }
+        }
         UiAction::Navigate(route) => {
             state.navigation.current_route = Some(route.clone());
             state.sidebar.highlighted_route = Some(route.clone());
@@ -127,6 +179,7 @@ fn reduce_ui_action(state: &mut UiState, action: UiAction) -> ReducerOutput {
             let mut effects = vec![Effect::Backend(BackendCommand::LoadConversation {
                 conversation_id: conversation_id.clone(),
             })];
+            effects.extend(load_bot_metadata(state, &conversation_id));
             if state
                 .backend
                 .accounts
@@ -148,7 +201,7 @@ fn reduce_ui_action(state: &mut UiState, action: UiAction) -> ReducerOutput {
             };
 
             let changed = state.timeline.conversation_id.as_ref() != Some(&conversation_id);
-            state.timeline.conversation_id = Some(conversation_id);
+            state.timeline.conversation_id = Some(conversation_id.clone());
             state.navigation.active_thread_root = None;
             state.thread.open = false;
             state.thread.root_message_id = None;
@@ -164,7 +217,11 @@ fn reduce_ui_action(state: &mut UiState, action: UiAction) -> ReducerOutput {
                 state.timeline.loading_older = false;
             }
 
-            ReducerOutput::default()
+            ReducerOutput {
+                effects: load_bot_metadata(state, &conversation_id)
+                    .into_iter()
+                    .collect(),
+            }
         }
         UiAction::NavigateBack => ReducerOutput::default(),
         UiAction::OpenThread { root_id } => {
@@ -1565,6 +1622,123 @@ fn reduce_backend_event(state: &mut UiState, event: BackendEvent) -> ReducerOutp
                 };
             }
         }
+        BackendEvent::FeaturedBotsResult {
+            request,
+            offset,
+            result,
+        } => {
+            let catalog = &mut state.backend.featured_bots;
+            if request != catalog.request {
+                return ReducerOutput::default();
+            }
+            catalog.loading = false;
+            match result {
+                Ok(page) => {
+                    catalog.apply_page(offset, page);
+                    catalog.error = None;
+                }
+                Err(error) => catalog.error = Some(error),
+            }
+        }
+        BackendEvent::BotsInvalidated { team_id, except } => {
+            return invalidate_bots(state, team_id.as_deref(), except.as_ref());
+        }
+        BackendEvent::BotsResult {
+            conversation_id,
+            request,
+            result,
+        } => {
+            let bots = state
+                .backend
+                .bots
+                .entry(conversation_id.clone())
+                .or_default();
+            if bots.request != request {
+                return ReducerOutput::default();
+            }
+            bots.loading = false;
+            let was_mutation = std::mem::take(&mut bots.mutation_pending);
+            let invalidated = std::mem::take(&mut bots.invalidated);
+            match result {
+                Ok(crate::domain::bots::BotResult::Loaded(snapshot)) => {
+                    bots.snapshot = snapshot;
+                    bots.error = None;
+                }
+                Ok(crate::domain::bots::BotResult::Changed {
+                    operation,
+                    snapshot,
+                    refresh_error,
+                }) => {
+                    if let Some(snapshot) = snapshot {
+                        bots.snapshot = snapshot;
+                    } else {
+                        bots.snapshot.commands.clear();
+                        use crate::domain::bots::{BotInfo, BotOperation};
+                        match operation {
+                            BotOperation::Add {
+                                username,
+                                settings,
+                                restricted,
+                            } => {
+                                bots.snapshot.bots.retain(|b| b.username != username);
+                                bots.snapshot.bots.push(BotInfo {
+                                    username,
+                                    restricted,
+                                    settings: restricted.then_some(settings),
+                                });
+                            }
+                            BotOperation::Save {
+                                username,
+                                settings,
+                                restricted,
+                            } => {
+                                if let Some(bot) = bots
+                                    .snapshot
+                                    .bots
+                                    .iter_mut()
+                                    .find(|b| b.username == username)
+                                {
+                                    bot.restricted = restricted;
+                                    bot.settings = restricted.then_some(settings);
+                                }
+                            }
+                            BotOperation::Remove { username } => {
+                                bots.snapshot.bots.retain(|b| b.username != username);
+                                bots.snapshot.commands.retain(|c| c.username != username);
+                            }
+                            _ => {}
+                        }
+                    }
+                    bots.completed_request = request;
+                    bots.error = refresh_error;
+                    bots.lookup = None;
+                }
+                Ok(crate::domain::bots::BotResult::Lookup { username, commands }) => {
+                    bots.lookup = Some((username, commands));
+                    bots.completed_request = request;
+                }
+                Ok(crate::domain::bots::BotResult::MutationFailed { error, can_manage }) => {
+                    if let Some(can_manage) = can_manage {
+                        bots.snapshot.can_manage = can_manage;
+                    }
+                    bots.failed_mutation = Some((request, error.clone()));
+                    bots.error = Some(error);
+                }
+                Err(error) => {
+                    if was_mutation {
+                        bots.failed_mutation = Some((request, error.clone()));
+                    }
+                    bots.error = Some(error);
+                }
+            }
+            if invalidated {
+                return ReducerOutput {
+                    effects: load_bot_metadata(state, &conversation_id)
+                        .into_iter()
+                        .collect(),
+                };
+            }
+        }
         BackendEvent::TeamRolesUpdated {
             conversation_id,
             team_id,
@@ -1574,12 +1748,19 @@ fn reduce_backend_event(state: &mut UiState, event: BackendEvent) -> ReducerOutp
             state
                 .backend
                 .conversation_team_ids
-                .insert(conversation_id, team_id.clone());
+                .insert(conversation_id.clone(), team_id.clone());
             let mut role_index = HashMap::new();
             for role_entry in roles {
                 role_index.insert(role_entry.user_id, role_entry.role);
             }
             state.backend.team_roles.insert(team_id, role_index);
+            if state.timeline.conversation_id.as_ref() == Some(&conversation_id) {
+                return ReducerOutput {
+                    effects: load_bot_metadata(state, &conversation_id)
+                        .into_iter()
+                        .collect(),
+                };
+            }
         }
         BackendEvent::ConversationMembersUpdated {
             conversation_id,
@@ -1909,6 +2090,28 @@ fn reduce_command_failure(
             // it was instead of leaving the optimistic choice on screen.
             apply_conversation_notification_settings(state, &conversation_id, previous);
         }
+        BackendCommand::Bots {
+            request,
+            operation: crate::domain::bots::BotOperation::Featured { .. },
+            ..
+        } => {
+            if state.backend.featured_bots.request == request {
+                state.backend.featured_bots.loading = false;
+                state.backend.featured_bots.error = Some(error.clone());
+            }
+        }
+        BackendCommand::Bots {
+            conversation_id,
+            request,
+            ..
+        } => {
+            if let Some(bots) = state.backend.bots.get_mut(&conversation_id)
+                && bots.request == request
+            {
+                bots.loading = false;
+                bots.error = Some(error.clone());
+            }
+        }
         BackendCommand::SendMessage {
             client_message_id, ..
         }
@@ -2234,6 +2437,7 @@ fn add_pending_message_to_state(
     };
     let thread_root_id = reply_to.clone();
     let pending_message = MessageRecord {
+        bot_username: None,
         id: pending_id,
         conversation_id: conversation_id.clone(),
         author_id: current_user_id(state),
@@ -3326,6 +3530,7 @@ mod tests {
         timestamp_ms: i64,
     ) -> crate::domain::message::MessageRecord {
         crate::domain::message::MessageRecord {
+            bot_username: None,
             id: MessageId::new(id.to_string()),
             conversation_id: conversation_id.clone(),
             author_id: UserId::new("alice"),
@@ -5365,3 +5570,102 @@ mod tests {
         assert_eq!(ids, vec!["100", "200", "300"]);
     }
 }
+
+/// Clear cached commands and privileges immediately, then reload the visible
+/// conversation. Inactive channels refresh on navigation. Never cancel a write.
+fn invalidate_bots(
+    state: &mut UiState,
+    team_id: Option<&str>,
+    except: Option<&ConversationId>,
+) -> ReducerOutput {
+    let affected_teams: Vec<_> = state
+        .backend
+        .team_roles
+        .keys()
+        .filter(|id| team_id.is_none_or(|team| id.as_str() == team))
+        .cloned()
+        .collect();
+    for team in affected_teams {
+        state.backend.team_roles.remove(&team);
+    }
+    state.backend.conversation_members.retain(|id, _| {
+        except == Some(id)
+            || !team_id.is_none_or(|team| {
+                state
+                    .backend
+                    .conversation_team_ids
+                    .get(id)
+                    .is_some_and(|t| t == team)
+            })
+    });
+    let mut refresh = None;
+    for (id, bots) in &mut state.backend.bots {
+        let affected = team_id.is_none_or(|team| {
+            bots.snapshot.team_id.as_deref() == Some(team)
+                || state
+                    .backend
+                    .conversation_team_ids
+                    .get(id)
+                    .is_some_and(|t| t == team)
+        });
+        if !affected || except == Some(id) {
+            continue;
+        }
+        bots.invalidated = true;
+        bots.snapshot.commands.clear();
+        bots.snapshot.can_manage = false;
+        state.backend.conversation_members.remove(id);
+        if bots.mutation_pending {
+            continue;
+        }
+        bots.request += 1;
+        bots.loading = false;
+        if state.timeline.conversation_id.as_ref() == Some(id) {
+            refresh = Some(id.clone());
+        }
+    }
+    let effects = refresh
+        .into_iter()
+        .flat_map(|id| {
+            let mut effects = vec![Effect::Backend(BackendCommand::LoadConversationMembers {
+                conversation_id: id.clone(),
+            })];
+            effects.extend(load_bot_metadata(state, &id));
+            effects
+        })
+        .collect();
+    ReducerOutput { effects }
+}
+
+/// Navigation refreshes command metadata without interrupting an in-flight edit.
+fn load_bot_metadata(state: &mut UiState, conversation_id: &ConversationId) -> Option<Effect> {
+    let supported = state
+        .backend
+        .conversation_bindings
+        .get(conversation_id)
+        .and_then(|b| state.backend.accounts.get(&b.account_id))
+        .is_some_and(|account| account.capabilities.supports_bots);
+    if !supported {
+        return None;
+    }
+    let bots = state
+        .backend
+        .bots
+        .entry(conversation_id.clone())
+        .or_default();
+    if bots.loading {
+        return None;
+    }
+    bots.request += 1;
+    bots.invalidated = false;
+    bots.loading = true;
+    bots.error = None;
+    Some(Effect::Backend(BackendCommand::Bots {
+        conversation_id: conversation_id.clone(),
+        request: bots.request,
+        operation: crate::domain::bots::BotOperation::Load,
+    }))
+}
+
+#[cfg(test)]
+mod bot_tests;

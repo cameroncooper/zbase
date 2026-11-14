@@ -3342,6 +3342,7 @@ mod tests {
             affinity: Affinity::Positive,
             is_team_admin_or_owner: false,
             is_team_owner: false,
+            is_bot: false,
             availability: None,
         };
         models.conversation.details = Some(ChannelDetails {
@@ -3428,6 +3429,7 @@ mod tests {
             affinity: Affinity::Positive,
             is_team_admin_or_owner: false,
             is_team_owner: false,
+            is_bot: false,
             availability: None,
         };
         models.conversation.details = Some(ChannelDetails {
@@ -3522,6 +3524,7 @@ mod tests {
                 affinity: Affinity::None,
                 is_team_admin_or_owner: false,
                 is_team_owner: false,
+                is_bot: false,
                 availability: None,
             })
             .collect::<Vec<_>>();

@@ -2190,6 +2190,7 @@ mod tests {
 
     pub(super) fn sample_message(conversation_id: &ConversationId, id: u64) -> MessageRecord {
         MessageRecord {
+            bot_username: None,
             id: MessageId::new(id.to_string()),
             conversation_id: conversation_id.clone(),
             author_id: UserId::new("alice"),
@@ -2216,6 +2217,7 @@ mod tests {
 
     fn sample_structured_message(conversation_id: &ConversationId, id: u64) -> MessageRecord {
         MessageRecord {
+            bot_username: None,
             id: MessageId::new(id.to_string()),
             conversation_id: conversation_id.clone(),
             author_id: UserId::new("alice"),

@@ -673,6 +673,13 @@ impl TimelineList {
                     .child(shown_name.clone())
                     .into_any_element(),
             ];
+            if timeline.bot_user_ids.contains(&row.author.id) {
+                header_children.push(crate::views::badge(
+                    "Bot",
+                    crate::views::panel_alt_bg(),
+                    text_secondary(),
+                ));
+            }
             if !is_you
                 && let Some(marker) = crate::views::identity_marker(
                     SharedString::from(format!("timeline-author-identity-{}", row.message.id.0)),
@@ -722,6 +729,15 @@ impl TimelineList {
                     // message under it.
                     .line_height(typography::font_px(18.))
                     .children(header_children),
+            );
+        }
+
+        if let Some(username) = &row.message.bot_username {
+            content = content.child(
+                div()
+                    .text_xs()
+                    .text_color(rgb(text_secondary()))
+                    .child(format!("Shared with @{username}")),
             );
         }
 

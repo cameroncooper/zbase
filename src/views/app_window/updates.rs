@@ -225,7 +225,7 @@ impl AppWindow {
             RightPaneMode::TeamDetails => "hidden".into(),
             RightPaneMode::Files => "files".into(),
             RightPaneMode::Profile(id) => format!("profile:{}", id.0),
-            RightPaneMode::Search => "hidden".into(),
+            RightPaneMode::Search | RightPaneMode::Bots => "hidden".into(),
         };
         session::save(
             &UpdateSession {

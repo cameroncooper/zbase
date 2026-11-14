@@ -184,9 +184,35 @@ fn member_section(
 ) -> AnyElement {
     details_card()
         .gap_2()
-        .child(section_heading(title))
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap_2()
+                .child(section_heading(title))
+                .when(row_id == "details-bot-entry", |row| {
+                    row.child(
+                        crate::views::secondary_button("details-manage-bots", "View all").on_click(
+                            cx.listener(|this, _, window, cx| this.open_bots(None, window, cx)),
+                        ),
+                    )
+                }),
+        )
+        .when(
+            row_id == "details-bot-entry" && members.is_empty(),
+            |card| {
+                card.child(
+                    div()
+                        .text_sm()
+                        .text_color(rgb(text_secondary()))
+                        .child("Add bots to use commands in this conversation."),
+                )
+            },
+        )
         .children(members.into_iter().enumerate().map(|(index, member)| {
             let user_id = member.user_id.clone();
+            let is_bot = member.is_bot;
             div()
                 .id((row_id, index))
                 .w_full()
@@ -200,7 +226,11 @@ fn member_section(
                 .cursor(CursorStyle::PointingHand)
                 .hover(|style| style.bg(subtle_surface()))
                 .on_click(cx.listener(move |this, _, window, cx| {
-                    this.open_user_profile_panel(user_id.clone(), window, cx);
+                    if is_bot {
+                        this.open_bots(Some(user_id.0.clone()), window, cx);
+                    } else {
+                        this.open_user_profile_panel(user_id.clone(), window, cx);
+                    }
                 }))
                 .child(member_avatar("details", &member, 32., panel_surface()))
                 .child(
@@ -222,7 +252,7 @@ fn member_section(
 pub(super) fn render_details_panel(
     conversation: &ConversationModel,
     timeline: &TimelineModel,
-    _capabilities: &BackendCapabilities,
+    capabilities: &BackendCapabilities,
     notification_selects: &[gpui_kit::Entity<crate::views::select::StyledSelect>; 2],
     cx: &mut Context<AppWindow>,
 ) -> AnyElement {
@@ -243,9 +273,7 @@ pub(super) fn render_details_panel(
     let members = details
         .map(|details| details.members.clone())
         .unwrap_or_default();
-    let (bots, people): (Vec<_>, Vec<_>) = members
-        .into_iter()
-        .partition(|member| member.user_id.0.to_ascii_lowercase().ends_with("bot"));
+    let (bots, people): (Vec<_>, Vec<_>) = members.into_iter().partition(|member| member.is_bot);
     let has_members = !people.is_empty();
     let has_bots = !bots.is_empty();
     let member_count = if member_count == 0 {
@@ -377,7 +405,7 @@ pub(super) fn render_details_panel(
                     cx,
                 ))
             })
-            .when(has_bots, |panel| {
+            .when(capabilities.supports_bots, |panel| {
                 panel.child(member_section(
                     &format!("Bots ({})", bots.len()),
                     "details-bot-entry",

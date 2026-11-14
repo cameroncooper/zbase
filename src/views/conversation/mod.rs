@@ -424,6 +424,55 @@ struct HeaderAction {
     pane: Option<RightPaneMode>,
 }
 
+fn header_actions(
+    kind: &ConversationKind,
+    member_count: u32,
+    right_pane: &RightPaneMode,
+    find_open: bool,
+) -> Vec<HeaderAction> {
+    let is_dm = matches!(kind, ConversationKind::DirectMessage);
+    let mut actions = vec![HeaderAction {
+        id: "conversation-header-find",
+        icon: "assets/icons/search.svg",
+        label: "Find in conversation",
+        shortcut: "⌘F",
+        count: None,
+        active: find_open,
+        pane: None,
+    }];
+    if !is_dm {
+        actions.push(HeaderAction {
+            id: "conversation-header-members",
+            icon: "assets/icons/members.svg",
+            label: "Members",
+            shortcut: "⇧⌘M",
+            count: (member_count > 0).then_some(member_count),
+            active: *right_pane == RightPaneMode::Members,
+            pane: Some(RightPaneMode::Members),
+        });
+    }
+    actions.push(HeaderAction {
+        id: "conversation-header-files",
+        icon: "assets/icons/files.svg",
+        label: "Files",
+        shortcut: "⇧⌘F",
+        count: None,
+        active: *right_pane == RightPaneMode::Files,
+        pane: Some(RightPaneMode::Files),
+    });
+    actions.push(HeaderAction {
+        id: "conversation-header-details",
+        icon: "assets/icons/info.svg",
+        label: "Conversation details",
+        shortcut: "⇧⌘D",
+        count: None,
+        active: *right_pane == RightPaneMode::Details,
+        pane: Some(RightPaneMode::Details),
+    });
+
+    actions
+}
+
 impl ConversationHeader {
     pub fn render(
         &self,
@@ -542,46 +591,12 @@ impl ConversationHeader {
             .map(|details| details.member_count)
             .filter(|count| *count > 0)
             .unwrap_or(conversation.member_count);
-        let mut actions = vec![HeaderAction {
-            id: "conversation-header-find",
-            icon: "assets/icons/search.svg",
-            label: "Find in conversation",
-            shortcut: "⌘F",
-            count: None,
-            active: find_open,
-            pane: None,
-        }];
-        if !is_dm {
-            actions.push(HeaderAction {
-                id: "conversation-header-members",
-                icon: "assets/icons/members.svg",
-                label: "Members",
-                shortcut: "⇧⌘M",
-                count: (member_count > 0).then_some(member_count),
-                active: *right_pane == RightPaneMode::Members,
-                pane: Some(RightPaneMode::Members),
-            });
-        }
-        actions.push(HeaderAction {
-            id: "conversation-header-files",
-            icon: "assets/icons/files.svg",
-            label: "Files",
-            shortcut: "⇧⌘F",
-            count: None,
-            active: *right_pane == RightPaneMode::Files,
-            pane: Some(RightPaneMode::Files),
-        });
-        if is_channel {
-            actions.push(HeaderAction {
-                id: "conversation-header-details",
-                icon: "assets/icons/info.svg",
-                label: "Conversation details",
-                shortcut: "⇧⌘D",
-                count: None,
-                active: *right_pane == RightPaneMode::Details,
-                pane: Some(RightPaneMode::Details),
-            });
-        }
+        let actions = header_actions(
+            &conversation.summary.kind,
+            member_count,
+            right_pane,
+            find_open,
+        );
 
         div()
             .min_h(typography::font_px(56.))
@@ -864,7 +879,23 @@ fn connection_banner(
 
 #[cfg(test)]
 mod tests {
-    use super::typing_dot_opacity;
+    use super::{ConversationKind, RightPaneMode, header_actions, typing_dot_opacity};
+    #[test]
+    fn details_and_bots_remain_reachable_in_every_conversation_kind() {
+        for kind in [
+            ConversationKind::DirectMessage,
+            ConversationKind::GroupDirectMessage,
+            ConversationKind::Channel,
+        ] {
+            let actions = header_actions(&kind, 2, &RightPaneMode::Hidden, false);
+            assert!(
+                actions
+                    .iter()
+                    .any(|action| action.pane == Some(RightPaneMode::Details)),
+                "{kind:?}"
+            );
+        }
+    }
 
     #[test]
     fn typing_dots_pulse_in_turn_within_their_range() {

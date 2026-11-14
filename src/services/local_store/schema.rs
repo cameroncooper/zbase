@@ -565,6 +565,10 @@ pub struct CachedMessageRecord {
     pub edit_id: Option<String>,
     #[serde(default)]
     pub edited_at_ms: Option<i64>,
+    // Appending preserves reads of older records through serde defaults. Older
+    // binaries cannot read the longer positional MessagePack record on downgrade.
+    #[serde(default)]
+    pub bot_username: Option<String>,
 }
 
 impl CachedMessageRecord {
@@ -580,6 +584,7 @@ impl CachedMessageRecord {
             id: message.id.0.clone(),
             conversation_id: message.conversation_id.0.clone(),
             author_id: message.author_id.0.clone(),
+            bot_username: message.bot_username.clone(),
             reply_to: message.reply_to.as_ref().map(|id| id.0.clone()),
             thread_root_id: message.thread_root_id.as_ref().map(|id| id.0.clone()),
             timestamp_ms: message.timestamp_ms,
@@ -648,6 +653,7 @@ impl CachedMessageRecord {
         };
 
         MessageRecord {
+            bot_username: self.bot_username.clone(),
             id: MessageId::new(self.id.clone()),
             conversation_id: ConversationId::new(self.conversation_id.clone()),
             author_id: UserId::new(self.author_id.clone()),
@@ -937,8 +943,32 @@ mod tests {
         }
     }
 
+    #[test]
+    fn bot_recipient_survives_cache_and_old_records_still_load() {
+        let mut message = sample_message_with_fragments();
+        message.bot_username = Some("zoombot".into());
+        let cached = CachedMessageRecord::from_domain(&message);
+        assert_eq!(cached.to_domain().bot_username, message.bot_username);
+        let encoded = rmp_serde::to_vec(&cached).unwrap();
+        let mut tuple = rmpv::decode::read_value(&mut std::io::Cursor::new(encoded)).unwrap();
+        let rmpv::Value::Array(ref mut fields) = tuple else {
+            panic!("cached messages use positional records")
+        };
+        fields.pop(); // the old record ends before bot_username
+        let mut old_bytes = Vec::new();
+        rmpv::encode::write_value(&mut old_bytes, &tuple).unwrap();
+        let old_binary: CachedMessageRecord = rmp_serde::from_slice(&old_bytes).unwrap();
+        assert_eq!(old_binary.to_domain().bot_username, None);
+        assert_eq!(old_binary.to_domain().source_text, message.source_text);
+        assert_eq!(old_binary.to_domain().author_id, message.author_id);
+        let mut old = serde_json::to_value(cached).unwrap();
+        old.as_object_mut().unwrap().remove("bot_username");
+        let old: CachedMessageRecord = serde_json::from_value(old).unwrap();
+        assert_eq!(old.to_domain().bot_username, None);
+    }
     fn sample_message_with_fragments() -> MessageRecord {
         MessageRecord {
+            bot_username: None,
             id: MessageId::new("1"),
             conversation_id: ConversationId::new("kb_conv:test"),
             author_id: UserId::new("alice"),
@@ -1087,6 +1117,7 @@ mod tests {
     #[test]
     fn cached_message_record_legacy_fallback_uses_body_text() {
         let cached = CachedMessageRecord {
+            bot_username: None,
             id: "2".to_string(),
             conversation_id: "kb_conv:test".to_string(),
             author_id: "alice".to_string(),

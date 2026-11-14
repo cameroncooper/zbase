@@ -1,4 +1,5 @@
 use crate::views::typography;
+mod bots;
 pub(crate) mod downloads;
 mod files;
 mod team_details;
@@ -283,6 +284,7 @@ struct ClosingPane {
 }
 
 pub struct AppWindow {
+    bot_ui: bots::BotUi,
     update_ui: updates::UpdateUi,
     /// Whether macOS shows zBase's banners, for Settings.
     notification_permission: notifications_service::NotificationPermission,
@@ -1022,6 +1024,7 @@ impl AppWindow {
             sidebar_filter_input,
             members_filter_input,
             notification_selects,
+            bot_ui: bots::BotUi::default(),
             selectable_texts: HashMap::new(),
             subscriptions: Vec::new(),
             thread_resize_drag: None,
@@ -2688,6 +2691,7 @@ impl AppWindow {
             .as_ref()
             .map(|matched| AutocompleteDismissSignature {
                 trigger: match matched.kind {
+                    AutocompleteTriggerKind::BotCommand => '!',
                     AutocompleteTriggerKind::Mention => '@',
                     AutocompleteTriggerKind::Emoji => ':',
                 },
@@ -2765,6 +2769,7 @@ impl AppWindow {
 
     fn build_autocomplete_state(&self, matched: TriggerMatch) -> Option<AutocompleteState> {
         let candidates = match matched.kind {
+            AutocompleteTriggerKind::BotCommand => self.bot_command_candidates(&matched.query),
             AutocompleteTriggerKind::Mention => self
                 .models
                 .mention_autocomplete_candidates(&matched.query, INLINE_AUTOCOMPLETE_MAX_RESULTS),
@@ -2782,6 +2787,7 @@ impl AppWindow {
         }
         Some(AutocompleteState {
             trigger: match matched.kind {
+                AutocompleteTriggerKind::BotCommand => '!',
                 AutocompleteTriggerKind::Mention => '@',
                 AutocompleteTriggerKind::Emoji => ':',
             },
@@ -3315,6 +3321,10 @@ impl AppWindow {
         let conversation = if matches!(
             scene,
             DemoScene::Dm
+                | DemoScene::DmDetails
+                | DemoScene::BotsDm
+                | DemoScene::FeaturedZoom
+                | DemoScene::FeaturedZoomReview
                 | DemoScene::FilesMedia
                 | DemoScene::FilesDocuments
                 | DemoScene::FilesEmpty
@@ -3404,6 +3414,18 @@ impl AppWindow {
                     cx,
                 );
             }
+            DemoScene::DmDetails => self.toggle_pane(RightPaneMode::Details, window, cx),
+            DemoScene::BotsDm
+            | DemoScene::FeaturedZoom
+            | DemoScene::FeaturedZoomReview
+            | DemoScene::Bots
+            | DemoScene::BotDetails
+            | DemoScene::BotAccess
+            | DemoScene::BotUnrestricted
+            | DemoScene::BotAdd
+            | DemoScene::BotAddReview
+            | DemoScene::BotRemove
+            | DemoScene::BotCommands => self.show_demo_bots(scene, window, cx),
             DemoScene::ChatStates => {
                 let mut events = demo::demo_send_state_messages()
                     .into_iter()
@@ -3599,6 +3621,7 @@ impl AppWindow {
             newest_message_id = Some(message_id.clone());
 
             let message = crate::domain::message::MessageRecord {
+                bot_username: None,
                 id: message_id,
                 conversation_id: conversation_id.clone(),
                 author_id: author.id.clone(),
@@ -4875,6 +4898,28 @@ impl AppWindow {
                     .contains(&details.conversation_id);
                 details
             });
+        self.models.timeline.bot_user_ids = self
+            .models
+            .conversation
+            .details
+            .as_ref()
+            .into_iter()
+            .flat_map(|d| &d.members)
+            .filter(|m| m.is_bot)
+            .map(|m| m.user_id.clone())
+            .collect();
+        if let Some(bots) = snapshot
+            .backend
+            .bots
+            .get(&self.models.conversation.summary.id)
+        {
+            self.models.timeline.bot_user_ids.extend(
+                bots.snapshot
+                    .bots
+                    .iter()
+                    .map(|b| UserId::new(b.username.clone())),
+            );
+        }
         let has_pinned_banner = self.models.conversation.pinned_message.is_some();
         let pinned_banner_visibility_changed = previous_has_pinned_banner != has_pinned_banner;
 
@@ -10015,6 +10060,10 @@ impl AppWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.bot_ui.form.is_some() {
+            self.bot_form_primary(window, cx);
+            return;
+        }
         if self.models.overlay.file_upload_lightbox.is_some() {
             let total = self
                 .models
@@ -10349,6 +10398,10 @@ impl AppWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.bot_ui.form.is_some() {
+            self.close_bot_form(window, cx);
+            return;
+        }
         if self.update_ui.open {
             self.close_update_panel(window, cx, true);
             return;
@@ -10405,6 +10458,7 @@ impl AppWindow {
                     | RightPaneMode::Profile(_)
                     | RightPaneMode::Details
                     | RightPaneMode::TeamDetails
+                    | RightPaneMode::Bots
             );
         if !had_overlay && is_editing {
             self.cancel_edit(cx);
@@ -10535,6 +10589,8 @@ impl Render for AppWindow {
 
                 let t_right = Instant::now();
                 let right_pane = shell_layout.show_right_pane.then(|| {
+                    let bot_panel = (self.models.navigation.right_pane == RightPaneMode::Bots)
+                        .then(|| self.render_bots_panel(cx));
                     let (navigation, thread, conversation, profile) = match &self.closing_pane {
                         Some(pane) if closing => (
                             &pane.navigation,
@@ -10562,6 +10618,7 @@ impl Render for AppWindow {
                     let thread_autocomplete =
                         self.render_autocomplete_popup_for(InputAutocompleteTarget::Thread, cx);
                     let pane = RightPaneHost.render(
+                        bot_panel,
                         navigation,
                         team_details,
                         &self.app_store.snapshot().workspace,
@@ -10900,6 +10957,9 @@ impl Render for AppWindow {
                         self.models.overlay.reaction_hover_tooltip.as_ref(),
                         |div, tooltip| div.child(render_reaction_hover_tooltip(tooltip, window)),
                     )
+                    .when(self.bot_ui.form.is_some(), |div| {
+                        div.child(self.render_bot_modal(window, cx))
+                    })
                     .when(self.update_ui.open, |div| {
                         div.child(self.render_update_panel(cx))
                     })
@@ -11184,6 +11244,17 @@ fn build_channel_details(
             }),
             is_team_owner: team_role_map
                 .is_some_and(|roles| matches!(roles.get(&user_id), Some(TeamRoleKind::Owner))),
+            is_bot: team_role_map.is_some_and(|roles| {
+                matches!(
+                    roles.get(&user_id),
+                    Some(TeamRoleKind::Bot | TeamRoleKind::RestrictedBot)
+                )
+            }) || backend.bots.get(&summary.id).is_some_and(|bots| {
+                bots.snapshot
+                    .bots
+                    .iter()
+                    .any(|bot| bot.username == user_id.0)
+            }),
             availability: backend
                 .user_presences
                 .get(&user_id)
@@ -13043,6 +13114,7 @@ mod tests {
 
     fn test_message(id: &str, event: Option<ChatEvent>) -> MessageRecord {
         MessageRecord {
+            bot_username: None,
             id: MessageId::new(id),
             conversation_id: ConversationId::new("kb_conv:test"),
             author_id: UserId::new("alice"),

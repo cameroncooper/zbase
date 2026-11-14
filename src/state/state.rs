@@ -216,6 +216,8 @@ pub struct ConfirmedReadPosition {
 
 #[derive(Clone, Debug, Default)]
 pub struct BackendRuntimeState {
+    pub featured_bots: crate::domain::bots::FeaturedBotCatalog,
+    pub bots: HashMap<ConversationId, crate::domain::bots::ConversationBots>,
     pub conversation_badges: HashMap<BackendId, ConversationBadgeState>,
     pub confirmed_read_positions: HashMap<ConversationId, ConfirmedReadPosition>,
     pub hydrated_accounts: HashSet<AccountId>,

@@ -14,14 +14,17 @@ use crate::{
     util::formatting::now_unix_ms,
 };
 
+mod bots;
 pub struct DemoBackend {
     joined_channels: std::collections::HashSet<ConversationId>,
+    bots: std::collections::HashMap<ConversationId, crate::domain::bots::BotSnapshot>,
 }
 
 impl DemoBackend {
     pub fn new() -> Self {
         Self {
             joined_channels: Default::default(),
+            bots: Default::default(),
         }
     }
 
@@ -166,6 +169,12 @@ impl ChatBackend for DemoBackend {
                     conversation_id: summary.id,
                 }]
             }
+            RoutedBackendCommand::Bots {
+                conversation,
+                request,
+                operation,
+                ..
+            } => self.bot_events(ConversationId::new(conversation.0), request, operation),
             RoutedBackendCommand::LoadConversation { conversation, .. } => {
                 Self::conversation_events(ConversationId::new(conversation.0))
             }

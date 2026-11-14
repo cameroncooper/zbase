@@ -69,6 +69,7 @@ pub struct ChannelMemberPreview {
     pub is_team_admin_or_owner: bool,
     /// Owner rather than admin; only meaningful with `is_team_admin_or_owner`.
     pub is_team_owner: bool,
+    pub is_bot: bool,
     /// Last known presence, `None` until the backend reports it.
     pub availability: Option<crate::domain::presence::Availability>,
 }

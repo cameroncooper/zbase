@@ -75,6 +75,7 @@ mod tests {
 
     fn message() -> MessageRecord {
         MessageRecord {
+            bot_username: None,
             id: MessageId::new("server-message"),
             conversation_id: ConversationId::new("conversation"),
             author_id: UserId::new("alice_example"),

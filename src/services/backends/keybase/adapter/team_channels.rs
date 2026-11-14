@@ -24,17 +24,7 @@ pub(super) fn start_load(
                     tokio::time::timeout(Duration::from_secs(30), async {
                         let transport = FramedMsgpackTransport::connect(&path).await?;
                         let mut client = KeybaseRpcClient::new(transport);
-                        let response = client
-                            .call(
-                                "chat.1.local.getTLFConversationsLocal",
-                                vec![Value::Map(vec![
-                                    ("tlfName".into(), team_name.clone().into()),
-                                    ("topicType".into(), TOPIC_TYPE_CHAT.into()),
-                                    ("membersType".into(), TEAM_MEMBERS_TYPE.into()),
-                                ])],
-                            )
-                            .await?;
-                        parse_channels(&response, &team_name, &account_id)
+                        load_channels(&mut client, &team_name, &account_id).await
                     })
                     .await
                     .map_err(|_| {
@@ -56,6 +46,24 @@ pub(super) fn start_load(
         let _ = sender.send(event);
         outcome.complete();
     });
+}
+
+pub(super) async fn load_channels(
+    client: &mut KeybaseRpcClient,
+    team_name: &str,
+    account_id: &AccountId,
+) -> io::Result<(Vec<TeamChannel>, Vec<ConversationBinding>)> {
+    let response = client
+        .call(
+            "chat.1.local.getTLFConversationsLocal",
+            vec![Value::Map(vec![
+                ("tlfName".into(), team_name.into()),
+                ("topicType".into(), TOPIC_TYPE_CHAT.into()),
+                ("membersType".into(), TEAM_MEMBERS_TYPE.into()),
+            ])],
+        )
+        .await?;
+    parse_channels(&response, team_name, account_id)
 }
 
 fn parse_channels(
