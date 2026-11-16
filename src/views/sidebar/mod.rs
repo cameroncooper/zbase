@@ -120,6 +120,11 @@ impl RowLook {
     }
 }
 
+/// How far read rows' text fades into the sidebar, so unread ones stand out.
+const READ_ROW_OPACITY: f32 = 0.75;
+/// Muted rows fade further than read ones.
+const MUTED_ROW_OPACITY: f32 = 0.5;
+
 /// Text and fill colors of one sidebar row, from its selection and hover state.
 pub(super) struct RowColors {
     pub primary: Hsla,
@@ -133,7 +138,7 @@ pub(super) struct RowColors {
 
 impl RowColors {
     /// Only unread conversations read in full contrast, so they stand out from
-    /// the rest: read rows recede to secondary text and muted ones further still.
+    /// the rest: read rows recede to faded secondary text and muted ones further still.
     /// Hover and selection bring a row back to full contrast.
     pub fn new(selected: bool, hovered: bool, activity: &RowActivity) -> Self {
         if selected {
@@ -147,14 +152,14 @@ impl RowColors {
             };
         }
         let background = hovered.then(|| rgb(sidebar_hover_bg()).into());
-        let secondary: Hsla = rgb(text_secondary()).into();
         let (primary, secondary) = if hovered || activity.is_unread() {
-            (rgb(text_primary()).into(), secondary)
+            (rgb(text_primary()).into(), rgb(text_secondary()).into())
         } else if activity.muted {
-            let faded = tint(text_secondary(), 0.6);
+            let faded = tint(text_secondary(), MUTED_ROW_OPACITY);
             (faded, faded)
         } else {
-            (secondary, secondary)
+            let faded = tint(text_secondary(), READ_ROW_OPACITY);
+            (faded, faded)
         };
         Self {
             primary,
@@ -1089,7 +1094,7 @@ impl Sidebar {
                 .child(icon_asset(
                     "assets/icons/hash.svg",
                     if size >= PREVIEW_AVATAR_PX { 18. } else { 16. },
-                    hsla_to_rgb(colors.secondary),
+                    hsla_to_rgb(colors.surface.blend(colors.secondary)),
                 ))
                 .into_any_element(),
             Route::DirectMessage { .. } => Avatar::render_sidebar_participants_on(
