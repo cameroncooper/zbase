@@ -30,8 +30,8 @@ use crate::{
         github_pr_preview::render_github_pr_preview,
         glass_surface_dark, hash_icon,
         inline_markdown::{InlineMarkdownConfig, apply_inline_markdown, remap_source_byte_range},
-        link, mono_font_family, mono_font_size, new_messages, panel_alt_bg, panel_bg, pencil_icon,
-        pin_icon, play_icon, plus_icon,
+        link, media_frame, mono_font_family, mono_font_size, new_messages, panel_alt_bg, panel_bg,
+        pencil_icon, pin_icon, play_icon, plus_icon,
         scaled_image::Fit,
         selectable_text::{
             InlineAttachment, LinkRange, SelectableText, StyledRange, resolve_selectable_text,
@@ -1154,13 +1154,14 @@ impl TimelineList {
                                     let lightbox_width = attachment.width.or(preview_width);
                                     let lightbox_height = attachment.height.or(preview_height);
                                     card = card.child(
-                                        div()
-                                            .id(SharedString::from(format!(
+                                        media_frame(
+                                            SharedString::from(format!(
                                                 "timeline-attachment-image-{}-{index}",
                                                 message.id.0
-                                            )))
-                                            .w(px(media_width))
-                                            .h(px(media_height))
+                                            )),
+                                            media_width,
+                                            media_height,
+                                        )
                                             .when_some(lightbox_source, |thumb, lightbox_source| {
                                                 let caption_text = lightbox_caption.clone();
                                                 let hover_message_id = message.id.clone();
@@ -1257,14 +1258,15 @@ impl TimelineList {
                                     let duration_label =
                                         attachment.duration_ms.map(format_duration_ms);
                                     card = card.child(
-                                        div()
-                                            .id(SharedString::from(format!(
+                                        media_frame(
+                                            SharedString::from(format!(
                                                 "timeline-attachment-video-{}-{index}",
                                                 message.id.0
-                                            )))
-                                            .relative()
-                                            .w(px(media_width))
-                                            .h(px(media_height))
+                                            )),
+                                            media_width,
+                                            media_height,
+                                        )
+                                        .relative()
                                             .rounded_md()
                                             .overflow_hidden()
                                             .flex_shrink_0()
