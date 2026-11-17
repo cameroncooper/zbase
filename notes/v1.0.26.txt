@@ -1,0 +1,5 @@
+## What's Changed
+* Fade read sidebar rows so unread ones stand out by @greimela in https://github.com/cameroncooper/zbase/pull/95
+
+
+**Full Changelog**: https://github.com/cameroncooper/zbase/compare/v1.0.25...v1.0.26
