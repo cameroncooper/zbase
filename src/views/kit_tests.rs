@@ -841,3 +841,41 @@ mod composer_keys {
         cx.update(|_, cx| assert_eq!(host.read(cx).confirmed, 1));
     }
 }
+
+#[gpui_kit::test]
+fn a_tall_image_stays_inside_its_media_frame(cx: &mut TestAppContext) {
+    use gpui_kit::test::TestSupportExt;
+    use gpui_kit::{ImageSource, InteractiveElement, ObjectFit, RenderImage, StyledImage, img};
+    use std::sync::Arc;
+
+    struct Frame(Arc<RenderImage>);
+    impl Render for Frame {
+        fn render(&mut self, _: &mut gpui_kit::Window, _: &mut Context<Self>) -> impl IntoElement {
+            // A narrow screenshot in the smallest frame the timeline gives one.
+            super::media_frame("frame", 120., 240.).child(
+                img(ImageSource::Render(self.0.clone()))
+                    .id("img")
+                    .w(px(120.))
+                    .h(px(240.))
+                    .object_fit(ObjectFit::Contain)
+                    .test_support(),
+            )
+        }
+    }
+
+    cx.update(gpui_kit::init);
+    let pixels = image::RgbaImage::new(100, 800);
+    let image = Arc::new(RenderImage::new(vec![image::Frame::new(pixels)]));
+    let (window, _) = cx.update(|cx| {
+        gpui_kit::open_window(Default::default(), cx, |_, cx| cx.new(|_| Frame(image))).unwrap()
+    });
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        let bounds = window.find("img").bounds();
+        assert_eq!(
+            (bounds.size.width, bounds.size.height),
+            (px(120.), px(240.))
+        );
+    })
+    .unwrap();
+}

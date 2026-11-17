@@ -35,8 +35,9 @@ pub mod typography;
 
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::{
-    AnyElement, Background, BoxShadow, FontWeight, Hsla, ImageSource, IntoElement, ParentElement,
-    SharedString, Styled, div, linear_color_stop, linear_gradient, point, px, rgb, svg,
+    AnyElement, Background, BoxShadow, Div, ElementId, FontWeight, Hsla, ImageSource,
+    InteractiveElement, IntoElement, ParentElement, SharedString, Stateful, Styled, div,
+    linear_color_stop, linear_gradient, point, px, rgb, svg,
 };
 use std::{cell::Cell, path::PathBuf};
 
@@ -875,6 +876,14 @@ pub fn link_preview_image_source(source: &str) -> ImageSource {
     } else {
         ImageSource::from(std::path::PathBuf::from(source))
     }
+}
+
+/// A fixed-size box for an attachment's image or video thumbnail. GPUI gives an
+/// image element its natural aspect ratio, and block layout lets that override
+/// the element's height, so a tall screenshot would spill over the messages
+/// below. Flex layout keeps the image at the box's size.
+pub fn media_frame(id: impl Into<ElementId>, width: f32, height: f32) -> Stateful<Div> {
+    div().id(id).flex().w(px(width)).h(px(height))
 }
 
 pub fn display_image_source(

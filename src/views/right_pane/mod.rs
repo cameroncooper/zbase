@@ -38,8 +38,8 @@ use crate::{
         format_duration_ms,
         inline_markdown::{InlineMarkdownConfig, apply_inline_markdown, remap_source_byte_range},
         input::TextField,
-        is_dark_theme, mention_colors_for_user, mono_font_family, mono_font_size, panel_alt_bg,
-        panel_alt_surface, play_icon,
+        is_dark_theme, media_frame, mention_colors_for_user, mono_font_family, mono_font_size,
+        panel_alt_bg, panel_alt_surface, play_icon,
         scaled_image::Fit,
         selectable_text::{
             InlineAttachment, LinkRange, SelectableText, StyledRange, resolve_selectable_text,
@@ -549,62 +549,58 @@ fn render_parent_message(
                                         let lightbox_width = preview_width;
                                         let lightbox_height = preview_height;
                                         card = card.child(
-                                            div()
-                                                .id(SharedString::from(format!(
+                                            media_frame(
+                                                SharedString::from(format!(
                                                     "right-pane-attachment-image-{}-{index}",
+                                                    message.id.0
+                                                )),
+                                                media_width,
+                                                media_height,
+                                            )
+                                            .when_some(lightbox_source, |thumb, lightbox_source| {
+                                                let caption_text = lightbox_caption.clone();
+                                                thumb.cursor(CursorStyle::PointingHand).on_click(
+                                                    cx.listener(move |this, _, _, cx| {
+                                                        this.open_image_lightbox(
+                                                            lightbox_source.clone(),
+                                                            caption_text.clone(),
+                                                            lightbox_width,
+                                                            lightbox_height,
+                                                            cx,
+                                                        );
+                                                    }),
+                                                )
+                                            })
+                                            .child(
+                                                img(display_image_source(
+                                                    attachment,
+                                                    media_source,
+                                                    media_width,
+                                                    media_height,
+                                                    Fit::Contain,
+                                                ))
+                                                .id(SharedString::from(format!(
+                                                    "rp-img-{}-{index}",
                                                     message.id.0
                                                 )))
                                                 .w(px(media_width))
                                                 .h(px(media_height))
-                                                .when_some(
-                                                    lightbox_source,
-                                                    |thumb, lightbox_source| {
-                                                        let caption_text = lightbox_caption.clone();
-                                                        thumb
-                                                            .cursor(CursorStyle::PointingHand)
-                                                            .on_click(cx.listener(
-                                                                move |this, _, _, cx| {
-                                                                    this.open_image_lightbox(
-                                                                        lightbox_source.clone(),
-                                                                        caption_text.clone(),
-                                                                        lightbox_width,
-                                                                        lightbox_height,
-                                                                        cx,
-                                                                    );
-                                                                },
-                                                            ))
-                                                    },
-                                                )
-                                                .child(
-                                                    img(display_image_source(
-                                                        attachment,
-                                                        media_source,
-                                                        media_width,
-                                                        media_height,
-                                                        Fit::Contain,
-                                                    ))
-                                                    .id(SharedString::from(format!(
-                                                        "rp-img-{}-{index}",
-                                                        message.id.0
-                                                    )))
-                                                    .w(px(media_width))
-                                                    .h(px(media_height))
-                                                    .rounded_md()
-                                                    .object_fit(ObjectFit::Contain)
-                                                    .flex_shrink_0()
-                                                    .min_w(px(16.))
-                                                    .min_h(px(16.))
-                                                    .with_fallback({
-                                                        let label = attachment_label.clone();
-                                                        move || {
-                                                            div()
-                                                                .text_size(typography::caption())
-                                                                .text_color(rgb(text_secondary()))
-                                                                .child(label.clone())
-                                                                .into_any_element()
-                                                        }
-                                                    }),
-                                                ),
+                                                .rounded_md()
+                                                .object_fit(ObjectFit::Contain)
+                                                .flex_shrink_0()
+                                                .min_w(px(16.))
+                                                .min_h(px(16.))
+                                                .with_fallback({
+                                                    let label = attachment_label.clone();
+                                                    move || {
+                                                        div()
+                                                            .text_size(typography::caption())
+                                                            .text_color(rgb(text_secondary()))
+                                                            .child(label.clone())
+                                                            .into_any_element()
+                                                    }
+                                                }),
+                                            ),
                                         );
                                         if let Some(ref caption) = caption_text {
                                             card = card.child(
@@ -642,71 +638,72 @@ fn render_parent_message(
                                         let duration_label =
                                             attachment.duration_ms.map(format_duration_ms);
                                         card = card.child(
-                                            div()
-                                                .id(SharedString::from(format!(
+                                            media_frame(
+                                                SharedString::from(format!(
                                                     "right-pane-attachment-video-{}-{index}",
                                                     message.id.0
-                                                )))
-                                                .relative()
-                                                .w(px(media_width))
-                                                .h(px(media_height))
-                                                .rounded_md()
-                                                .overflow_hidden()
-                                                .flex_shrink_0()
-                                                .cursor(CursorStyle::PointingHand)
-                                                .when_some(video_path, |el, path| {
-                                                    el.on_click(cx.listener(move |_, _, _, cx| {
-                                                        AppWindow::open_video_in_native_player(
-                                                            &path, cx,
-                                                        );
-                                                    }))
-                                                })
-                                                .child(
-                                                    img(display_image_source(
-                                                        attachment,
-                                                        thumb_source,
-                                                        media_width,
-                                                        media_height,
-                                                        Fit::Cover,
-                                                    ))
-                                                    .size_full()
-                                                    .object_fit(ObjectFit::Cover),
-                                                )
-                                                .child(
+                                                )),
+                                                media_width,
+                                                media_height,
+                                            )
+                                            .relative()
+                                            .rounded_md()
+                                            .overflow_hidden()
+                                            .flex_shrink_0()
+                                            .cursor(CursorStyle::PointingHand)
+                                            .when_some(video_path, |el, path| {
+                                                el.on_click(cx.listener(move |_, _, _, cx| {
+                                                    AppWindow::open_video_in_native_player(
+                                                        &path, cx,
+                                                    );
+                                                }))
+                                            })
+                                            .child(
+                                                img(display_image_source(
+                                                    attachment,
+                                                    thumb_source,
+                                                    media_width,
+                                                    media_height,
+                                                    Fit::Cover,
+                                                ))
+                                                .size_full()
+                                                .object_fit(ObjectFit::Cover),
+                                            )
+                                            .child(
+                                                div()
+                                                    .absolute()
+                                                    .inset_0()
+                                                    .flex()
+                                                    .items_center()
+                                                    .justify_center()
+                                                    .bg(tint(0x000000, 0.3))
+                                                    .child(
+                                                        div()
+                                                            .w(px(40.))
+                                                            .h(px(40.))
+                                                            .rounded_full()
+                                                            .bg(tint(0x000000, 0.5))
+                                                            .flex()
+                                                            .items_center()
+                                                            .justify_center()
+                                                            .child(play_icon(0xFFFFFF)),
+                                                    ),
+                                            )
+                                            .when_some(duration_label, |el, label| {
+                                                el.child(
                                                     div()
                                                         .absolute()
-                                                        .inset_0()
-                                                        .flex()
-                                                        .items_center()
-                                                        .justify_center()
-                                                        .bg(tint(0x000000, 0.3))
-                                                        .child(
-                                                            div()
-                                                                .w(px(40.))
-                                                                .h(px(40.))
-                                                                .rounded_full()
-                                                                .bg(tint(0x000000, 0.5))
-                                                                .flex()
-                                                                .items_center()
-                                                                .justify_center()
-                                                                .child(play_icon(0xFFFFFF)),
-                                                        ),
+                                                        .bottom_1()
+                                                        .right_1()
+                                                        .px_1p5()
+                                                        .py_0p5()
+                                                        .rounded_sm()
+                                                        .bg(tint(0x000000, 0.6))
+                                                        .text_size(typography::caption())
+                                                        .text_color(rgb(0xFFFFFF))
+                                                        .child(label),
                                                 )
-                                                .when_some(duration_label, |el, label| {
-                                                    el.child(
-                                                        div()
-                                                            .absolute()
-                                                            .bottom_1()
-                                                            .right_1()
-                                                            .px_1p5()
-                                                            .py_0p5()
-                                                            .rounded_sm()
-                                                            .bg(tint(0x000000, 0.6))
-                                                            .text_size(typography::caption())
-                                                            .text_color(rgb(0xFFFFFF))
-                                                            .child(label),
-                                                    )
-                                                }),
+                                            }),
                                         );
                                     }
 
