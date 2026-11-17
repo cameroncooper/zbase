@@ -1423,7 +1423,7 @@ impl TimelineList {
                                         .child(reaction.emoji.clone())
                                         .into_any_element()
                                 }
-                            } else if let Some(standard) = standard_emoji_for_alias(&alias) {
+                            } else if let Some(standard) = standard_reaction_unicode(&alias) {
                                 reaction_glyph(standard.to_string())
                             } else {
                                 div()
@@ -1502,7 +1502,7 @@ impl TimelineList {
                                     }
                                 }))
                                 .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.quick_react(
+                                    this.toggle_reaction(
                                         message_id.clone(),
                                         reaction_emoji.clone(),
                                         cx,
@@ -3951,10 +3951,16 @@ fn reaction_tooltip_glyph(resolved: Option<&InlineEmojiRender>, alias: &str) -> 
             }
             (None, None) => ReactionGlyph::Missing,
         },
-        None => standard_emoji_for_alias(alias)
+        None => standard_reaction_unicode(alias)
             .map(|unicode| ReactionGlyph::Unicode(unicode.to_string()))
             .unwrap_or(ReactionGlyph::Missing),
     }
+}
+
+/// A standard reaction's emoji, named by shortcode (`+1`) or sent as the
+/// character itself (`👍`), as the quick-react bar does.
+fn standard_reaction_unicode(alias: &str) -> Option<&'static str> {
+    standard_emoji_for_alias(alias).or_else(|| emojis::get(alias.trim()).map(emojis::Emoji::as_str))
 }
 
 fn reaction_hover_content(
@@ -4205,6 +4211,22 @@ mod tests {
         )
         .expect("one actor");
         assert_eq!(content.names, "You");
+    }
+
+    #[test]
+    fn reaction_tooltip_draws_emoji_sent_as_the_character_itself() {
+        assert_eq!(
+            reaction_tooltip_glyph(None, "👍"),
+            ReactionGlyph::Unicode("👍".to_string())
+        );
+        assert_eq!(
+            reaction_tooltip_glyph(None, "+1"),
+            ReactionGlyph::Unicode("👍".to_string())
+        );
+        assert_eq!(
+            reaction_tooltip_glyph(None, "team_specific_unknown_emoji"),
+            ReactionGlyph::Missing
+        );
     }
 
     #[test]

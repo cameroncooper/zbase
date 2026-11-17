@@ -8668,10 +8668,34 @@ impl AppWindow {
         self.refresh(cx);
     }
 
+    /// Reacts with an emoji from the toolbar or the picker, written the way
+    /// Keybase writes it so it joins the same reaction from other clients.
     pub(crate) fn quick_react(
         &mut self,
         message_id: MessageId,
         emoji: String,
+        cx: &mut Context<Self>,
+    ) {
+        let reaction = crate::util::emoji_aliases::keybase_reaction(&emoji);
+        self.send_reaction(message_id, reaction, emoji, cx);
+    }
+
+    /// Adds or removes your reaction exactly as written, so a chip toggles the
+    /// reaction it shows.
+    pub(crate) fn toggle_reaction(
+        &mut self,
+        message_id: MessageId,
+        reaction: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.send_reaction(message_id, reaction.clone(), reaction, cx);
+    }
+
+    fn send_reaction(
+        &mut self,
+        message_id: MessageId,
+        reaction: String,
+        recent_alias: String,
         cx: &mut Context<Self>,
     ) {
         let Some(conversation_id) = self.app_store.snapshot().timeline.conversation_id.clone()
@@ -8681,10 +8705,10 @@ impl AppWindow {
         self.ensure_message_binding_for_active_conversation(&message_id);
         self.dispatch_ui_action(UiAction::ReactToMessage {
             conversation_id,
-            message_id: message_id.clone(),
-            emoji: emoji.clone(),
+            message_id,
+            emoji: reaction,
         });
-        self.models.add_recent_emoji_alias(emoji);
+        self.models.add_recent_emoji_alias(recent_alias);
         self.persist_settings();
         self.refresh(cx);
     }
@@ -8764,7 +8788,7 @@ impl AppWindow {
         self.dispatch_ui_action(UiAction::ReactToMessage {
             conversation_id,
             message_id: message_id.clone(),
-            emoji: emoji.trim().to_string(),
+            emoji: crate::util::emoji_aliases::keybase_reaction(emoji),
         });
         self.refresh(cx);
         true
