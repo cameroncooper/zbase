@@ -152,12 +152,12 @@ fn builtin_command(text: &str) -> Option<PendingCommand> {
     }
     let word = text.split_whitespace().next().unwrap_or(text);
     let name = word.strip_prefix('/').unwrap_or(word);
-    let posts_message = if name.starts_with("shrug") {
-        true
-    } else {
-        // `/me` only posts the italic action when it has a message argument.
-        name.starts_with("me") && text.split_whitespace().nth(1).is_some()
-    };
+    // `/me` only posts the italic action when it has a message argument;
+    // `/shrug`, `/flip`, and `/giphy` post their result themselves.
+    let posts_message = name.starts_with("shrug")
+        || name.starts_with("flip")
+        || name.starts_with("giphy")
+        || (name.starts_with("me") && text.split_whitespace().nth(1).is_some());
     Some(PendingCommand {
         feedback: (!posts_message).then(|| format!("Sent {word} to Keybase")),
     })
@@ -16722,6 +16722,10 @@ mod tests {
         assert_eq!(command_feedback("/shrugs"), Some(None));
         assert_eq!(command_feedback("/me waves"), Some(None));
         assert_eq!(command_feedback("/message hi"), Some(None));
+        assert_eq!(command_feedback("/flip"), Some(None));
+        assert_eq!(command_feedback("/flip 6"), Some(None));
+        assert_eq!(command_feedback("/giphy cats"), Some(None));
+        assert_eq!(command_feedback("/giphys"), Some(None));
         // Commands with no visible output confirm they reached Keybase.
         assert_eq!(
             command_feedback("/mute  "),
