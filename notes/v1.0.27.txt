@@ -1,0 +1,6 @@
+## What's Changed
+* Keep tall image attachments inside their frame by @greimela in https://github.com/cameroncooper/zbase/pull/97
+* Send reactions the way Keybase writes them by @greimela in https://github.com/cameroncooper/zbase/pull/96
+
+
+**Full Changelog**: https://github.com/cameroncooper/zbase/compare/v1.0.26...v1.0.27
