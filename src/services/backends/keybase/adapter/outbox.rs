@@ -40,20 +40,15 @@ impl PendingOutboxSends {
         None
     }
 
-    /// `is_slash_command` marks posts Keybase may have handled itself. Built-in
-    /// commands run in the daemon, so the response is empty even though the
-    /// command may post a message (such as `/shrug`) under a different outbox.
-    pub fn acknowledge(
-        &mut self,
-        response: &Value,
-        meta: PendingSendMeta,
-        is_slash_command: bool,
-    ) -> Option<BackendEvent> {
+    pub fn acknowledge(&mut self, response: &Value, meta: PendingSendMeta) -> Option<BackendEvent> {
         let Some(id) = extract_outbox_id_from_post_response(response) else {
-            if is_slash_command {
+            // Named commands may be run by the daemon, which posts any result
+            // under a different outbox and returns no outbox id here.
+            if let Some(command) = meta.command {
                 return Some(BackendEvent::MessageCommandHandled {
                     op_id: meta.op_id,
                     client_message_id: meta.client_message_id,
+                    command,
                 });
             }
             return Some(BackendEvent::MessageSendFailed {
@@ -113,10 +108,25 @@ mod tests {
             op_id: OpId::new("operation"),
             client_message_id: ClientMessageId::new("client-message"),
             local_attachment_path: None,
+            command: None,
+        }
+    }
+    fn command_meta(command: &str) -> PendingSendMeta {
+        PendingSendMeta {
+            command: Some(command.to_string()),
+            ..meta()
         }
     }
     fn response() -> Value {
         Value::Map(vec![(Value::from("outboxID"), Value::from("outbox"))])
+    }
+    /// A zero-valued `PostLocalNonblockRes`, as returned for handled commands.
+    fn empty_response() -> Value {
+        Value::Map(vec![
+            (Value::from("rateLimits"), Value::Nil),
+            (Value::from("outboxID"), Value::Nil),
+            (Value::from("identifyFailures"), Value::Nil),
+        ])
     }
 
     #[test]
@@ -126,13 +136,13 @@ mod tests {
         // The notification races ahead of the postNonblock RPC response.
         assert!(pending.confirm("outbox".into(), &message).is_none());
         assert!(
-            matches!(pending.acknowledge(&response(), meta(), false), Some(BackendEvent::MessageSendConfirmed { client_message_id, server_message, .. })
+            matches!(pending.acknowledge(&response(), meta()), Some(BackendEvent::MessageSendConfirmed { client_message_id, server_message, .. })
             if client_message_id == meta().client_message_id && server_message.id == message.id)
         );
         assert!(pending.pending.is_empty());
         assert!(pending.early_confirmations.is_empty());
         // The ordinary order still waits for the actual live confirmation.
-        assert!(pending.acknowledge(&response(), meta(), false).is_none());
+        assert!(pending.acknowledge(&response(), meta()).is_none());
         assert_eq!(pending.pending.len(), 1);
         assert_eq!(
             pending
@@ -148,7 +158,13 @@ mod tests {
     fn malformed_acknowledgement_fails_instead_of_leaving_a_send_pending() {
         let mut pending = PendingOutboxSends::default();
         assert!(matches!(
-            pending.acknowledge(&Value::Nil, meta(), false),
+            pending.acknowledge(&Value::Nil, meta()),
+            Some(BackendEvent::MessageSendFailed { .. })
+        ));
+        // A real but outbox-less response must still fail for ordinary text,
+        // including unknown slash-prefixed text such as `/r/rust`.
+        assert!(matches!(
+            pending.acknowledge(&empty_response(), meta()),
             Some(BackendEvent::MessageSendFailed { .. })
         ));
         assert!(pending.pending.is_empty());
@@ -161,12 +177,10 @@ mod tests {
     #[test]
     fn a_daemon_handled_command_is_not_a_failed_send() {
         let mut pending = PendingOutboxSends::default();
-        // The daemon reports success without an outbox id for built-in slash
-        // commands, including ones like `/shrug` that post their own message.
         assert!(matches!(
-            pending.acknowledge(&Value::Nil, meta(), true),
-            Some(BackendEvent::MessageCommandHandled { client_message_id, .. })
-                if client_message_id == meta().client_message_id
+            pending.acknowledge(&empty_response(), command_meta("/shrug")),
+            Some(BackendEvent::MessageCommandHandled { client_message_id, command, .. })
+                if client_message_id == meta().client_message_id && command == "/shrug"
         ));
         assert!(pending.pending.is_empty());
     }

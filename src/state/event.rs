@@ -210,12 +210,13 @@ pub enum BackendEvent {
         client_message_id: ClientMessageId,
         error: String,
     },
-    /// Keybase ran the text as a built-in slash command instead of posting it.
-    /// The command may post its own message (for example `/shrug`), but the
-    /// post itself has no outbox id and will never be confirmed.
+    /// The backend ran the text as a command instead of posting it.
+    /// A command may create its own message, but this send itself will never
+    /// be confirmed because it produced no outbox id.
     MessageCommandHandled {
         op_id: OpId,
         client_message_id: ClientMessageId,
+        command: String,
     },
     /// Bytes of a pending attachment message uploaded so far.
     AttachmentUploadProgress {

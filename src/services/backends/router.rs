@@ -883,10 +883,10 @@ mod tests {
         router
             .inflight_sends
             .insert(second.clone(), OpId::new("op-second"));
-        router.finish_send_events(&[BackendEvent::MessageSendFailed {
+        router.finish_send_events(&[BackendEvent::MessageCommandHandled {
             op_id: OpId::new("op-first"),
             client_message_id: first,
-            error: "offline".into(),
+            command: "/mute".into(),
         }]);
         assert!(router.has_inflight_sends());
         router.finish_send_events(&[BackendEvent::MessageSendFailed {

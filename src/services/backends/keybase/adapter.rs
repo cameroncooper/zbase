@@ -121,6 +121,22 @@ struct PendingSendMeta {
     op_id: OpId,
     client_message_id: ClientMessageId,
     local_attachment_path: Option<String>,
+    /// The built-in command the daemon may run instead of posting the text.
+    command: Option<String>,
+}
+
+/// Keybase's built-in chat commands. A post whose first word is one of these
+/// may be run by the daemon instead of being stored as a message.
+const BUILTIN_COMMAND_NAMES: &[&str] = &[
+    "me", "shrug", "flip", "mute", "msg", "collapse", "expand", "hide", "unhide", "headline",
+    "join", "leave", "location", "giphy", "clear",
+];
+
+fn builtin_command_name(text: &str) -> Option<String> {
+    let name = text.strip_prefix('/')?.split_whitespace().next()?;
+    BUILTIN_COMMAND_NAMES
+        .contains(&name)
+        .then(|| format!("/{name}"))
 }
 
 struct BackendTaskOutcome {
@@ -1098,7 +1114,7 @@ impl ChatBackend for KeybaseBackend {
                     .and_then(provider_message_ref_to_message_id)
                     .and_then(|message_id| message_id.0.parse::<i64>().ok());
                 let mut emitted = Vec::new();
-                let is_slash_command = text.starts_with('/');
+                let command = builtin_command_name(&text);
                 if let Some(path) = socket_path()
                     && let Ok(runtime) = Builder::new_current_thread().enable_all().build()
                 {
@@ -1131,13 +1147,12 @@ impl ChatBackend for KeybaseBackend {
                                 op_id,
                                 client_message_id,
                                 local_attachment_path: None,
+                                command,
                             };
                             match self.pending_outbox_sends.lock() {
-                                Ok(mut pending) => emitted.extend(pending.acknowledge(
-                                    &response,
-                                    meta,
-                                    is_slash_command,
-                                )),
+                                Ok(mut pending) => {
+                                    emitted.extend(pending.acknowledge(&response, meta))
+                                }
                                 Err(_) => emitted.push(BackendEvent::MessageSendFailed {
                                     op_id: meta.op_id,
                                     client_message_id: meta.client_message_id,
@@ -1227,13 +1242,12 @@ impl ChatBackend for KeybaseBackend {
                                 op_id,
                                 client_message_id,
                                 local_attachment_path: Some(local_path.clone()),
+                                command: None,
                             };
                             match self.pending_outbox_sends.lock() {
-                                Ok(mut pending) => emitted.extend(pending.acknowledge(
-                                    &response,
-                                    meta,
-                                    false,
-                                )),
+                                Ok(mut pending) => {
+                                    emitted.extend(pending.acknowledge(&response, meta))
+                                }
                                 Err(_) => emitted.push(BackendEvent::MessageSendFailed {
                                     op_id: meta.op_id,
                                     client_message_id: meta.client_message_id,
@@ -16426,7 +16440,7 @@ fn as_binary(value: &Value) -> Option<&Vec<u8>> {
 
 fn outbox_id_to_string(value: &Value) -> Option<String> {
     if let Some(bytes) = as_binary(value) {
-        return Some(hex_encode(bytes));
+        return (!bytes.is_empty()).then(|| hex_encode(bytes));
     }
     let text = as_str(value)?.trim();
     if text.is_empty() {
@@ -16672,6 +16686,29 @@ fn send_internal(sender: &Sender<BackendEvent>, method: &str, payload: Value) {
 #[cfg(test)]
 mod tests {
     use super::attachment_hydration::image_attachment_hydration_flags;
+
+    #[test]
+    fn only_named_builtin_commands_may_be_handled_by_the_daemon() {
+        assert_eq!(builtin_command_name("/shrug").as_deref(), Some("/shrug"));
+        assert_eq!(builtin_command_name("/me waves").as_deref(), Some("/me"));
+        assert_eq!(builtin_command_name("/mute  ").as_deref(), Some("/mute"));
+        // Unknown slash-prefixed text is posted normally and must still fail
+        // loudly if the response unexpectedly lacks an outbox id.
+        assert_eq!(builtin_command_name("/r/rust"), None);
+        assert_eq!(builtin_command_name("/shrugs"), None);
+        assert_eq!(builtin_command_name("/Shrug"), None);
+        assert_eq!(builtin_command_name("hello /shrug"), None);
+    }
+
+    #[test]
+    fn empty_outbox_ids_are_not_valid() {
+        assert_eq!(outbox_id_to_string(&Value::Binary(Vec::new())), None);
+        assert_eq!(
+            outbox_id_to_string(&Value::Binary(vec![0xab])),
+            Some("ab".into())
+        );
+        assert_eq!(outbox_id_to_string(&Value::from("")), None);
+    }
 
     #[test]
     fn attachment_upload_progress_notifications_name_the_outbox_send() {
