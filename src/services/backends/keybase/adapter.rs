@@ -121,8 +121,15 @@ struct PendingSendMeta {
     op_id: OpId,
     client_message_id: ClientMessageId,
     local_attachment_path: Option<String>,
-    /// The built-in command the daemon may run instead of posting the text.
-    command: Option<String>,
+    /// Set when the daemon may run the post as a built-in command.
+    command: Option<PendingCommand>,
+}
+
+#[derive(Clone, Debug)]
+struct PendingCommand {
+    /// User-facing feedback for a command whose output is not a visible
+    /// message, or `None` when the command posts its own result.
+    feedback: Option<String>,
 }
 
 /// Keybase's built-in chat command names and aliases. The daemon matches them
@@ -133,14 +140,27 @@ const BUILTIN_COMMAND_NAMES: &[&str] = &[
     "location", "me", "msg", "mute", "shh", "shrug", "topic", "unhide",
 ];
 
-/// Returns the word the user typed (including the slash) when the daemon may
-/// run the post as a built-in command.
-fn builtin_command_name(text: &str) -> Option<String> {
+/// Returns command metadata when the daemon may run the post as a built-in
+/// command. Feedback names the word the user typed, including the slash.
+fn builtin_command(text: &str) -> Option<PendingCommand> {
     let rest = text.strip_prefix('/')?;
-    BUILTIN_COMMAND_NAMES
+    if !BUILTIN_COMMAND_NAMES
         .iter()
         .any(|name| rest.starts_with(name))
-        .then(|| text.split_whitespace().next().unwrap_or(text).to_string())
+    {
+        return None;
+    }
+    let word = text.split_whitespace().next().unwrap_or(text);
+    let name = word.strip_prefix('/').unwrap_or(word);
+    let posts_message = if name.starts_with("shrug") {
+        true
+    } else {
+        // `/me` only posts the italic action when it has a message argument.
+        name.starts_with("me") && text.split_whitespace().nth(1).is_some()
+    };
+    Some(PendingCommand {
+        feedback: (!posts_message).then(|| format!("Sent {word} to Keybase")),
+    })
 }
 
 struct BackendTaskOutcome {
@@ -1118,7 +1138,7 @@ impl ChatBackend for KeybaseBackend {
                     .and_then(provider_message_ref_to_message_id)
                     .and_then(|message_id| message_id.0.parse::<i64>().ok());
                 let mut emitted = Vec::new();
-                let command = builtin_command_name(&text);
+                let command = builtin_command(&text);
                 if let Some(path) = socket_path()
                     && let Ok(runtime) = Builder::new_current_thread().enable_all().build()
                 {
@@ -16691,37 +16711,54 @@ fn send_internal(sender: &Sender<BackendEvent>, method: &str, payload: Value) {
 mod tests {
     use super::attachment_hydration::image_attachment_hydration_flags;
 
+    fn command_feedback(text: &str) -> Option<Option<String>> {
+        builtin_command(text).map(|command| command.feedback)
+    }
+
     #[test]
     fn only_named_builtin_commands_may_be_handled_by_the_daemon() {
-        assert_eq!(builtin_command_name("/shrug").as_deref(), Some("/shrug"));
-        assert_eq!(builtin_command_name("/me waves").as_deref(), Some("/me"));
-        assert_eq!(builtin_command_name("/mute  ").as_deref(), Some("/mute"));
-        // The daemon matches plain prefixes and aliases too.
-        assert_eq!(builtin_command_name("/shrugs").as_deref(), Some("/shrugs"));
-        assert_eq!(builtin_command_name("/meh").as_deref(), Some("/meh"));
+        // Commands that post their own message carry no toast.
+        assert_eq!(command_feedback("/shrug"), Some(None));
+        assert_eq!(command_feedback("/shrugs"), Some(None));
+        assert_eq!(command_feedback("/me waves"), Some(None));
+        assert_eq!(command_feedback("/message hi"), Some(None));
+        // Commands with no visible output confirm they reached Keybase.
         assert_eq!(
-            builtin_command_name("/message hi").as_deref(),
-            Some("/message")
-        );
-        assert_eq!(builtin_command_name("/mutex").as_deref(), Some("/mutex"));
-        assert_eq!(builtin_command_name("/dm alice hi").as_deref(), Some("/dm"));
-        assert_eq!(builtin_command_name("/shh").as_deref(), Some("/shh"));
-        assert_eq!(
-            builtin_command_name("/topic elsewhere").as_deref(),
-            Some("/topic")
+            command_feedback("/mute  "),
+            Some(Some("Sent /mute to Keybase".into()))
         );
         assert_eq!(
-            builtin_command_name("/addemoji party").as_deref(),
-            Some("/addemoji")
+            command_feedback("/meh"),
+            Some(Some("Sent /meh to Keybase".into()))
+        );
+        assert_eq!(
+            command_feedback("/mutex"),
+            Some(Some("Sent /mutex to Keybase".into()))
+        );
+        assert_eq!(
+            command_feedback("/dm alice hi"),
+            Some(Some("Sent /dm to Keybase".into()))
+        );
+        assert_eq!(
+            command_feedback("/shh"),
+            Some(Some("Sent /shh to Keybase".into()))
+        );
+        assert_eq!(
+            command_feedback("/topic elsewhere"),
+            Some(Some("Sent /topic to Keybase".into()))
+        );
+        assert_eq!(
+            command_feedback("/addemoji party"),
+            Some(Some("Sent /addemoji to Keybase".into()))
         );
         // Unknown slash-prefixed text is posted normally and must still fail
         // loudly if the response unexpectedly lacks an outbox id.
-        assert_eq!(builtin_command_name("/r/rust"), None);
-        assert_eq!(builtin_command_name("/clear"), None);
+        assert_eq!(command_feedback("/r/rust"), None);
+        assert_eq!(command_feedback("/clear"), None);
         // `hidden` does not prefix-match `hide`.
-        assert_eq!(builtin_command_name("/hidden"), None);
-        assert_eq!(builtin_command_name("/Shrug"), None);
-        assert_eq!(builtin_command_name("hello /shrug"), None);
+        assert_eq!(command_feedback("/hidden"), None);
+        assert_eq!(command_feedback("/Shrug"), None);
+        assert_eq!(command_feedback("hello /shrug"), None);
     }
 
     #[test]

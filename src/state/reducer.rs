@@ -1215,19 +1215,15 @@ fn reduce_backend_event(state: &mut UiState, event: BackendEvent) -> ReducerOutp
         BackendEvent::MessageCommandHandled {
             op_id: _,
             client_message_id,
-            command,
+            feedback,
         } => {
             // The backend ran the command instead of posting the text. Any
             // message it creates (e.g. the expanded `/shrug`) arrives
             // separately, so the optimistic copy must not linger as an unsent
-            // message. The daemon swallows command errors, so confirm that the
-            // command reached Keybase unless its result is already visible.
+            // message.
             remove_local_message(state, &pending_message_id_for_client(&client_message_id));
-            if !command_has_visible_result(&command) {
-                state
-                    .notifications
-                    .toasts
-                    .push(format!("Sent {command} to Keybase"));
+            if let Some(feedback) = feedback {
+                state.notifications.toasts.push(feedback);
             }
         }
         BackendEvent::AttachmentUploadProgress {
@@ -2806,13 +2802,6 @@ fn discard_failed_message(state: &mut UiState, message_id: &MessageId) {
     }
 }
 
-/// `/me` and `/shrug` post their result as a normal message, so their toast
-/// would only duplicate what the conversation already shows.
-fn command_has_visible_result(command: &str) -> bool {
-    let name = command.strip_prefix('/').unwrap_or(command);
-    name.starts_with("me") || name.starts_with("shrug")
-}
-
 /// Removes an optimistic message that only exists on this client: a discarded
 /// send or one the backend handled as a command. Clears its sidebar preview
 /// even when the user navigated away before the acknowledgement, so a local id
@@ -3702,7 +3691,7 @@ mod tests {
             BackendEvent::MessageCommandHandled {
                 op_id: OpId::new("op"),
                 client_message_id: client,
-                command: "/shrug".into(),
+                feedback: None,
             },
         );
         assert!(
@@ -3755,7 +3744,7 @@ mod tests {
             BackendEvent::MessageCommandHandled {
                 op_id: OpId::new("op"),
                 client_message_id: client,
-                command: "/mute".into(),
+                feedback: Some("Sent /mute to Keybase".into()),
             },
         );
         assert!(
@@ -3814,7 +3803,7 @@ mod tests {
             BackendEvent::MessageCommandHandled {
                 op_id: OpId::new("op"),
                 client_message_id: client,
-                command: "/mute".into(),
+                feedback: Some("Sent /mute to Keybase".into()),
             },
         );
         assert!(state.workspace.channels[0].last_message.is_none());

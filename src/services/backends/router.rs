@@ -886,7 +886,7 @@ mod tests {
         router.finish_send_events(&[BackendEvent::MessageCommandHandled {
             op_id: OpId::new("op-first"),
             client_message_id: first,
-            command: "/mute".into(),
+            feedback: Some("Sent /mute to Keybase".into()),
         }]);
         assert!(router.has_inflight_sends());
         router.finish_send_events(&[BackendEvent::MessageSendFailed {

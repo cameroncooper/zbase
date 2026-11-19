@@ -48,7 +48,7 @@ impl PendingOutboxSends {
                 return Some(BackendEvent::MessageCommandHandled {
                     op_id: meta.op_id,
                     client_message_id: meta.client_message_id,
-                    command,
+                    feedback: command.feedback,
                 });
             }
             return Some(BackendEvent::MessageSendFailed {
@@ -73,6 +73,7 @@ impl PendingOutboxSends {
 
 #[cfg(test)]
 mod tests {
+    use super::super::PendingCommand;
     use super::*;
     use crate::{
         domain::{
@@ -111,9 +112,11 @@ mod tests {
             command: None,
         }
     }
-    fn command_meta(command: &str) -> PendingSendMeta {
+    fn command_meta(feedback: Option<&str>) -> PendingSendMeta {
         PendingSendMeta {
-            command: Some(command.to_string()),
+            command: Some(PendingCommand {
+                feedback: feedback.map(str::to_string),
+            }),
             ..meta()
         }
     }
@@ -178,9 +181,18 @@ mod tests {
     fn a_daemon_handled_command_is_not_a_failed_send() {
         let mut pending = PendingOutboxSends::default();
         assert!(matches!(
-            pending.acknowledge(&empty_response(), command_meta("/shrug")),
-            Some(BackendEvent::MessageCommandHandled { client_message_id, command, .. })
-                if client_message_id == meta().client_message_id && command == "/shrug"
+            pending.acknowledge(
+                &empty_response(),
+                command_meta(Some("Sent /mute to Keybase"))
+            ),
+            Some(BackendEvent::MessageCommandHandled { client_message_id, feedback, .. })
+                if client_message_id == meta().client_message_id
+                    && feedback.as_deref() == Some("Sent /mute to Keybase")
+        ));
+        // Commands whose output is a message carry no separate feedback.
+        assert!(matches!(
+            pending.acknowledge(&empty_response(), command_meta(None)),
+            Some(BackendEvent::MessageCommandHandled { feedback: None, .. })
         ));
         assert!(pending.pending.is_empty());
     }

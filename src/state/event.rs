@@ -216,7 +216,8 @@ pub enum BackendEvent {
     MessageCommandHandled {
         op_id: OpId,
         client_message_id: ClientMessageId,
-        command: String,
+        /// Optional user-facing feedback supplied by the backend.
+        feedback: Option<String>,
     },
     /// Bytes of a pending attachment message uploaded so far.
     AttachmentUploadProgress {
