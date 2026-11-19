@@ -1098,6 +1098,7 @@ impl ChatBackend for KeybaseBackend {
                     .and_then(provider_message_ref_to_message_id)
                     .and_then(|message_id| message_id.0.parse::<i64>().ok());
                 let mut emitted = Vec::new();
+                let is_slash_command = text.starts_with('/');
                 if let Some(path) = socket_path()
                     && let Ok(runtime) = Builder::new_current_thread().enable_all().build()
                 {
@@ -1132,7 +1133,11 @@ impl ChatBackend for KeybaseBackend {
                                 local_attachment_path: None,
                             };
                             match self.pending_outbox_sends.lock() {
-                                Ok(mut pending) => emitted.extend(pending.acknowledge(&response, meta)),
+                                Ok(mut pending) => emitted.extend(pending.acknowledge(
+                                    &response,
+                                    meta,
+                                    is_slash_command,
+                                )),
                                 Err(_) => emitted.push(BackendEvent::MessageSendFailed {
                                     op_id: meta.op_id,
                                     client_message_id: meta.client_message_id,
@@ -1224,7 +1229,11 @@ impl ChatBackend for KeybaseBackend {
                                 local_attachment_path: Some(local_path.clone()),
                             };
                             match self.pending_outbox_sends.lock() {
-                                Ok(mut pending) => emitted.extend(pending.acknowledge(&response, meta)),
+                                Ok(mut pending) => emitted.extend(pending.acknowledge(
+                                    &response,
+                                    meta,
+                                    false,
+                                )),
                                 Err(_) => emitted.push(BackendEvent::MessageSendFailed {
                                     op_id: meta.op_id,
                                     client_message_id: meta.client_message_id,

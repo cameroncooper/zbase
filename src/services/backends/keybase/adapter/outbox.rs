@@ -40,8 +40,22 @@ impl PendingOutboxSends {
         None
     }
 
-    pub fn acknowledge(&mut self, response: &Value, meta: PendingSendMeta) -> Option<BackendEvent> {
+    /// `is_slash_command` marks posts Keybase may have handled itself. Built-in
+    /// commands run in the daemon, so the response is empty even though the
+    /// command may post a message (such as `/shrug`) under a different outbox.
+    pub fn acknowledge(
+        &mut self,
+        response: &Value,
+        meta: PendingSendMeta,
+        is_slash_command: bool,
+    ) -> Option<BackendEvent> {
         let Some(id) = extract_outbox_id_from_post_response(response) else {
+            if is_slash_command {
+                return Some(BackendEvent::MessageCommandHandled {
+                    op_id: meta.op_id,
+                    client_message_id: meta.client_message_id,
+                });
+            }
             return Some(BackendEvent::MessageSendFailed {
                 op_id: meta.op_id,
                 client_message_id: meta.client_message_id,
@@ -112,13 +126,13 @@ mod tests {
         // The notification races ahead of the postNonblock RPC response.
         assert!(pending.confirm("outbox".into(), &message).is_none());
         assert!(
-            matches!(pending.acknowledge(&response(), meta()), Some(BackendEvent::MessageSendConfirmed { client_message_id, server_message, .. })
+            matches!(pending.acknowledge(&response(), meta(), false), Some(BackendEvent::MessageSendConfirmed { client_message_id, server_message, .. })
             if client_message_id == meta().client_message_id && server_message.id == message.id)
         );
         assert!(pending.pending.is_empty());
         assert!(pending.early_confirmations.is_empty());
         // The ordinary order still waits for the actual live confirmation.
-        assert!(pending.acknowledge(&response(), meta()).is_none());
+        assert!(pending.acknowledge(&response(), meta(), false).is_none());
         assert_eq!(pending.pending.len(), 1);
         assert_eq!(
             pending
@@ -134,7 +148,7 @@ mod tests {
     fn malformed_acknowledgement_fails_instead_of_leaving_a_send_pending() {
         let mut pending = PendingOutboxSends::default();
         assert!(matches!(
-            pending.acknowledge(&Value::Nil, meta()),
+            pending.acknowledge(&Value::Nil, meta(), false),
             Some(BackendEvent::MessageSendFailed { .. })
         ));
         assert!(pending.pending.is_empty());
@@ -142,5 +156,18 @@ mod tests {
             pending.confirm(id.to_string(), &message());
         }
         assert_eq!(pending.early_confirmations.len(), 128);
+    }
+
+    #[test]
+    fn a_daemon_handled_command_is_not_a_failed_send() {
+        let mut pending = PendingOutboxSends::default();
+        // The daemon reports success without an outbox id for built-in slash
+        // commands, including ones like `/shrug` that post their own message.
+        assert!(matches!(
+            pending.acknowledge(&Value::Nil, meta(), true),
+            Some(BackendEvent::MessageCommandHandled { client_message_id, .. })
+                if client_message_id == meta().client_message_id
+        ));
+        assert!(pending.pending.is_empty());
     }
 }

@@ -435,7 +435,6 @@ fn reduce_ui_action(state: &mut UiState, action: UiAction) -> ReducerOutput {
             if draft_text.trim().is_empty() {
                 return ReducerOutput::default();
             }
-
             match key.clone() {
                 DraftKey::Conversation(conversation_id) => {
                     let client_message_id = next_client_message_id(state);
@@ -1211,6 +1210,15 @@ fn reduce_backend_event(state: &mut UiState, event: BackendEvent) -> ReducerOutp
             let pending_id = pending_message_id_for_client(&client_message_id);
             mark_message_failed(state, &pending_id);
             state.notifications.toasts.push(error);
+        }
+        BackendEvent::MessageCommandHandled {
+            op_id: _,
+            client_message_id,
+        } => {
+            // The daemon ran the command instead of posting the text. Any
+            // message it posts (e.g. the expanded `/shrug`) arrives separately,
+            // so the optimistic copy must not linger as an unsent message.
+            remove_local_message(state, &pending_message_id_for_client(&client_message_id));
         }
         BackendEvent::AttachmentUploadProgress {
             client_message_id,
@@ -2777,12 +2785,27 @@ fn discard_failed_message(state: &mut UiState, message_id: &MessageId) {
     let is_failed = |message: &MessageRecord| {
         message.id == *message_id && message.send_state == MessageSendState::Failed
     };
-    let Some(failed) = state
+    if state
         .timeline
         .messages
         .iter()
         .chain(&state.thread.replies)
-        .find(|message| is_failed(message))
+        .any(is_failed)
+    {
+        remove_local_message(state, message_id);
+    }
+}
+
+/// Removes a message that only exists on this client: a discarded send or one
+/// the daemon handled as a command. If it was the conversation's newest, the
+/// preview falls back to the message before it.
+fn remove_local_message(state: &mut UiState, message_id: &MessageId) {
+    let Some(removed) = state
+        .timeline
+        .messages
+        .iter()
+        .chain(&state.thread.replies)
+        .find(|message| message.id == *message_id)
         .cloned()
     else {
         return;
@@ -2790,25 +2813,26 @@ fn discard_failed_message(state: &mut UiState, message_id: &MessageId) {
     state
         .timeline
         .messages
-        .retain(|message| !is_failed(message));
-    state.thread.replies.retain(|message| !is_failed(message));
+        .retain(|message| message.id != *message_id);
+    state
+        .thread
+        .replies
+        .retain(|message| message.id != *message_id);
     state.timeline.upload_progress.remove(message_id);
-    // If the failed message was the conversation's newest, preview the one
-    // before it instead.
     let replacement = state
         .timeline
         .messages
         .iter()
         .rev()
-        .filter(|message| message.conversation_id == failed.conversation_id)
+        .filter(|message| message.conversation_id == removed.conversation_id)
         .find_map(MessagePreview::from_message);
     let mut previews_changed = false;
-    for summary in conversation_summaries_mut(state, &failed.conversation_id) {
-        let previews_failed = summary
+    for summary in conversation_summaries_mut(state, &removed.conversation_id) {
+        let previews_removed = summary
             .last_message
             .as_ref()
             .is_some_and(|preview| preview.message_id.as_ref() == Some(message_id));
-        if previews_failed {
+        if previews_removed {
             summary.last_message = replacement.clone();
             previews_changed = true;
         }
@@ -3623,6 +3647,50 @@ mod tests {
             },
         );
         assert_eq!(state.timeline.messages.len(), 1);
+    }
+
+    #[test]
+    fn a_daemon_handled_command_removes_the_optimistic_message() {
+        let id = ConversationId::new("conv");
+        let mut state = UiState::default();
+        state.timeline.conversation_id = Some(id.clone());
+        let mut summary = channel_summary(&id.0, "general");
+        let earlier = message(&id, "5", 1_000);
+        summary.last_message = MessagePreview::from_message(&earlier);
+        state.workspace.channels.push(summary);
+        state.timeline.messages.push(earlier.clone());
+        let client = ClientMessageId::new("command");
+        add_pending_message_to_state(&mut state, &id, "/shrug", vec![], None, &client);
+        let handled_id = pending_message_id_for_client(&client);
+        assert_eq!(
+            state.workspace.channels[0]
+                .last_message
+                .as_ref()
+                .and_then(|preview| preview.message_id.clone()),
+            Some(handled_id.clone())
+        );
+
+        reduce_backend_event(
+            &mut state,
+            BackendEvent::MessageCommandHandled {
+                op_id: OpId::new("op"),
+                client_message_id: client,
+            },
+        );
+        assert!(
+            state
+                .timeline
+                .messages
+                .iter()
+                .all(|message| message.id != handled_id)
+        );
+        assert_eq!(
+            state.workspace.channels[0]
+                .last_message
+                .as_ref()
+                .and_then(|preview| preview.message_id.clone()),
+            Some(earlier.id.clone())
+        );
     }
 
     #[test]

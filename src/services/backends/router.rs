@@ -107,6 +107,9 @@ impl BackendRouter {
                 }
                 | BackendEvent::MessageSendFailed {
                     client_message_id, ..
+                }
+                | BackendEvent::MessageCommandHandled {
+                    client_message_id, ..
                 } => {
                     self.inflight_sends.remove(client_message_id);
                 }
