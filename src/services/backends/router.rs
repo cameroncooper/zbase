@@ -107,6 +107,9 @@ impl BackendRouter {
                 }
                 | BackendEvent::MessageSendFailed {
                     client_message_id, ..
+                }
+                | BackendEvent::MessageCommandHandled {
+                    client_message_id, ..
                 } => {
                     self.inflight_sends.remove(client_message_id);
                 }
@@ -880,10 +883,10 @@ mod tests {
         router
             .inflight_sends
             .insert(second.clone(), OpId::new("op-second"));
-        router.finish_send_events(&[BackendEvent::MessageSendFailed {
+        router.finish_send_events(&[BackendEvent::MessageCommandHandled {
             op_id: OpId::new("op-first"),
             client_message_id: first,
-            error: "offline".into(),
+            feedback: Some("Sent /mute to Keybase".into()),
         }]);
         assert!(router.has_inflight_sends());
         router.finish_send_events(&[BackendEvent::MessageSendFailed {

@@ -42,6 +42,15 @@ impl PendingOutboxSends {
 
     pub fn acknowledge(&mut self, response: &Value, meta: PendingSendMeta) -> Option<BackendEvent> {
         let Some(id) = extract_outbox_id_from_post_response(response) else {
+            // Named commands may be run by the daemon, which posts any result
+            // under a different outbox and returns no outbox id here.
+            if let Some(command) = meta.command {
+                return Some(BackendEvent::MessageCommandHandled {
+                    op_id: meta.op_id,
+                    client_message_id: meta.client_message_id,
+                    feedback: command.feedback,
+                });
+            }
             return Some(BackendEvent::MessageSendFailed {
                 op_id: meta.op_id,
                 client_message_id: meta.client_message_id,
@@ -64,6 +73,7 @@ impl PendingOutboxSends {
 
 #[cfg(test)]
 mod tests {
+    use super::super::PendingCommand;
     use super::*;
     use crate::{
         domain::{
@@ -99,10 +109,27 @@ mod tests {
             op_id: OpId::new("operation"),
             client_message_id: ClientMessageId::new("client-message"),
             local_attachment_path: None,
+            command: None,
+        }
+    }
+    fn command_meta(feedback: Option<&str>) -> PendingSendMeta {
+        PendingSendMeta {
+            command: Some(PendingCommand {
+                feedback: feedback.map(str::to_string),
+            }),
+            ..meta()
         }
     }
     fn response() -> Value {
         Value::Map(vec![(Value::from("outboxID"), Value::from("outbox"))])
+    }
+    /// A zero-valued `PostLocalNonblockRes`, as returned for handled commands.
+    fn empty_response() -> Value {
+        Value::Map(vec![
+            (Value::from("rateLimits"), Value::Nil),
+            (Value::from("outboxID"), Value::Nil),
+            (Value::from("identifyFailures"), Value::Nil),
+        ])
     }
 
     #[test]
@@ -137,10 +164,36 @@ mod tests {
             pending.acknowledge(&Value::Nil, meta()),
             Some(BackendEvent::MessageSendFailed { .. })
         ));
+        // A real but outbox-less response must still fail for ordinary text,
+        // including unknown slash-prefixed text such as `/r/rust`.
+        assert!(matches!(
+            pending.acknowledge(&empty_response(), meta()),
+            Some(BackendEvent::MessageSendFailed { .. })
+        ));
         assert!(pending.pending.is_empty());
         for id in 0..256 {
             pending.confirm(id.to_string(), &message());
         }
         assert_eq!(pending.early_confirmations.len(), 128);
+    }
+
+    #[test]
+    fn a_daemon_handled_command_is_not_a_failed_send() {
+        let mut pending = PendingOutboxSends::default();
+        assert!(matches!(
+            pending.acknowledge(
+                &empty_response(),
+                command_meta(Some("Sent /mute to Keybase"))
+            ),
+            Some(BackendEvent::MessageCommandHandled { client_message_id, feedback, .. })
+                if client_message_id == meta().client_message_id
+                    && feedback.as_deref() == Some("Sent /mute to Keybase")
+        ));
+        // Commands whose output is a message carry no separate feedback.
+        assert!(matches!(
+            pending.acknowledge(&empty_response(), command_meta(None)),
+            Some(BackendEvent::MessageCommandHandled { feedback: None, .. })
+        ));
+        assert!(pending.pending.is_empty());
     }
 }

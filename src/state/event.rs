@@ -210,6 +210,15 @@ pub enum BackendEvent {
         client_message_id: ClientMessageId,
         error: String,
     },
+    /// The backend ran the text as a command instead of posting it.
+    /// A command may create its own message, but this send itself will never
+    /// be confirmed because it produced no outbox id.
+    MessageCommandHandled {
+        op_id: OpId,
+        client_message_id: ClientMessageId,
+        /// Optional user-facing feedback supplied by the backend.
+        feedback: Option<String>,
+    },
     /// Bytes of a pending attachment message uploaded so far.
     AttachmentUploadProgress {
         client_message_id: ClientMessageId,

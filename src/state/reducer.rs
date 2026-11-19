@@ -1212,6 +1212,20 @@ fn reduce_backend_event(state: &mut UiState, event: BackendEvent) -> ReducerOutp
             mark_message_failed(state, &pending_id);
             state.notifications.toasts.push(error);
         }
+        BackendEvent::MessageCommandHandled {
+            op_id: _,
+            client_message_id,
+            feedback,
+        } => {
+            // The backend ran the command instead of posting the text. Any
+            // message it creates (e.g. the expanded `/shrug`) arrives
+            // separately, so the optimistic copy must not linger as an unsent
+            // message.
+            remove_local_message(state, &pending_message_id_for_client(&client_message_id));
+            if let Some(feedback) = feedback {
+                state.notifications.toasts.push(feedback);
+            }
+        }
         BackendEvent::AttachmentUploadProgress {
             client_message_id,
             sent_bytes,
@@ -2777,38 +2791,64 @@ fn discard_failed_message(state: &mut UiState, message_id: &MessageId) {
     let is_failed = |message: &MessageRecord| {
         message.id == *message_id && message.send_state == MessageSendState::Failed
     };
-    let Some(failed) = state
+    if state
         .timeline
         .messages
         .iter()
         .chain(&state.thread.replies)
-        .find(|message| is_failed(message))
-        .cloned()
-    else {
-        return;
-    };
-    state
-        .timeline
-        .messages
-        .retain(|message| !is_failed(message));
-    state.thread.replies.retain(|message| !is_failed(message));
-    state.timeline.upload_progress.remove(message_id);
-    // If the failed message was the conversation's newest, preview the one
-    // before it instead.
-    let replacement = state
+        .any(is_failed)
+    {
+        remove_local_message(state, message_id);
+    }
+}
+
+/// Removes an optimistic message that only exists on this client: a discarded
+/// send or one the backend handled as a command. Clears its sidebar preview
+/// even when the user navigated away before the acknowledgement, so a local id
+/// cannot stay stuck there.
+fn remove_local_message(state: &mut UiState, message_id: &MessageId) {
+    debug_assert!(
+        message_id.0.starts_with("local:"),
+        "remove_local_message only handles optimistic ids, got {}",
+        message_id.0
+    );
+    let removed = state
         .timeline
         .messages
         .iter()
-        .rev()
-        .filter(|message| message.conversation_id == failed.conversation_id)
-        .find_map(MessagePreview::from_message);
+        .chain(&state.thread.replies)
+        .find(|message| message.id == *message_id)
+        .cloned();
+    state
+        .timeline
+        .messages
+        .retain(|message| message.id != *message_id);
+    state
+        .thread
+        .replies
+        .retain(|message| message.id != *message_id);
+    state.timeline.upload_progress.remove(message_id);
+    let replacement = removed.as_ref().and_then(|removed| {
+        state
+            .timeline
+            .messages
+            .iter()
+            .rev()
+            .filter(|message| message.conversation_id == removed.conversation_id)
+            .find_map(MessagePreview::from_message)
+    });
     let mut previews_changed = false;
-    for summary in conversation_summaries_mut(state, &failed.conversation_id) {
-        let previews_failed = summary
+    for summary in state
+        .workspace
+        .channels
+        .iter_mut()
+        .chain(&mut state.workspace.direct_messages)
+    {
+        if summary
             .last_message
             .as_ref()
-            .is_some_and(|preview| preview.message_id.as_ref() == Some(message_id));
-        if previews_failed {
+            .is_some_and(|preview| preview.message_id.as_ref() == Some(message_id))
+        {
             summary.last_message = replacement.clone();
             previews_changed = true;
         }
@@ -3623,6 +3663,150 @@ mod tests {
             },
         );
         assert_eq!(state.timeline.messages.len(), 1);
+    }
+
+    #[test]
+    fn a_daemon_handled_command_removes_the_optimistic_message() {
+        let id = ConversationId::new("conv");
+        let mut state = UiState::default();
+        state.timeline.conversation_id = Some(id.clone());
+        let mut summary = channel_summary(&id.0, "general");
+        let earlier = message(&id, "5", 1_000);
+        summary.last_message = MessagePreview::from_message(&earlier);
+        state.workspace.channels.push(summary);
+        state.timeline.messages.push(earlier.clone());
+        let client = ClientMessageId::new("command");
+        add_pending_message_to_state(&mut state, &id, "/shrug", vec![], None, &client);
+        let handled_id = pending_message_id_for_client(&client);
+        assert_eq!(
+            state.workspace.channels[0]
+                .last_message
+                .as_ref()
+                .and_then(|preview| preview.message_id.clone()),
+            Some(handled_id.clone())
+        );
+
+        reduce_backend_event(
+            &mut state,
+            BackendEvent::MessageCommandHandled {
+                op_id: OpId::new("op"),
+                client_message_id: client,
+                feedback: None,
+            },
+        );
+        assert!(
+            state
+                .timeline
+                .messages
+                .iter()
+                .all(|message| message.id != handled_id)
+        );
+        assert!(
+            state
+                .timeline
+                .messages
+                .iter()
+                .chain(&state.thread.replies)
+                .all(|message| message.send_state != MessageSendState::Failed)
+        );
+        // The expanded shrug message is its own feedback.
+        assert!(state.notifications.toasts.is_empty());
+        assert_eq!(
+            state.workspace.channels[0]
+                .last_message
+                .as_ref()
+                .and_then(|preview| preview.message_id.clone()),
+            Some(earlier.id.clone())
+        );
+    }
+
+    #[test]
+    fn a_daemon_handled_thread_command_leaves_no_reply_or_failure() {
+        let id = ConversationId::new("conv");
+        let root = MessageId::new("10");
+        let mut state = UiState::default();
+        state.timeline.conversation_id = Some(id.clone());
+        state.thread.root_message_id = Some(root.clone());
+        state.thread.open = true;
+        let client = ClientMessageId::new("thread-command");
+        add_pending_message_to_state(&mut state, &id, "/mute", vec![], Some(root), &client);
+        let pending_id = pending_message_id_for_client(&client);
+        assert!(
+            state
+                .thread
+                .replies
+                .iter()
+                .any(|message| message.id == pending_id)
+        );
+
+        reduce_backend_event(
+            &mut state,
+            BackendEvent::MessageCommandHandled {
+                op_id: OpId::new("op"),
+                client_message_id: client,
+                feedback: Some("Sent /mute to Keybase".into()),
+            },
+        );
+        assert!(
+            state
+                .timeline
+                .messages
+                .iter()
+                .all(|message| message.id != pending_id)
+        );
+        assert!(
+            state
+                .thread
+                .replies
+                .iter()
+                .all(|message| message.id != pending_id)
+        );
+        assert!(
+            state
+                .timeline
+                .messages
+                .iter()
+                .chain(&state.thread.replies)
+                .all(|message| message.send_state != MessageSendState::Failed)
+        );
+        assert_eq!(
+            state.notifications.toasts,
+            vec!["Sent /mute to Keybase".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_handled_command_clears_its_preview_after_navigation() {
+        let id = ConversationId::new("conv");
+        let mut state = UiState::default();
+        state.timeline.conversation_id = Some(id.clone());
+        state
+            .workspace
+            .channels
+            .push(channel_summary(&id.0, "general"));
+        let client = ClientMessageId::new("navigated-command");
+        add_pending_message_to_state(&mut state, &id, "/mute", vec![], None, &client);
+        let pending_id = pending_message_id_for_client(&client);
+        assert_eq!(
+            state.workspace.channels[0]
+                .last_message
+                .as_ref()
+                .and_then(|preview| preview.message_id.clone()),
+            Some(pending_id)
+        );
+
+        // Leaving the conversation drops the local timeline but not the preview.
+        state.timeline.messages.clear();
+        state.timeline.conversation_id = None;
+        reduce_backend_event(
+            &mut state,
+            BackendEvent::MessageCommandHandled {
+                op_id: OpId::new("op"),
+                client_message_id: client,
+                feedback: Some("Sent /mute to Keybase".into()),
+            },
+        );
+        assert!(state.workspace.channels[0].last_message.is_none());
     }
 
     #[test]
