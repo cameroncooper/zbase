@@ -7529,6 +7529,7 @@ impl AppWindow {
 
     pub(crate) fn restore_chat_focus(&self, window: &mut Window, cx: &mut Context<Self>) {
         let o = &self.models.overlay;
+        // Modal overlays manage their own focus; don't steal it from them.
         if o.quick_switcher_open
             || o.command_palette_open
             || o.emoji_picker_open
@@ -7536,10 +7537,19 @@ impl AppWindow {
             || o.fullscreen_image.is_some()
             || o.file_upload_lightbox.is_some()
             || o.profile_card_user_id.is_some()
-            || self.models.find_in_chat.open
-            || self.keybase_inspector.open
-            || self.splash_open
         {
+            return;
+        }
+        if self.models.find_in_chat.open {
+            let chat_input_focused = self.composer_input.focus_handle(cx).is_focused(window)
+                || self.thread_input.focus_handle(cx).is_focused(window);
+            if !chat_input_focused {
+                window.focus(&self.find_in_chat_input.focus_handle(cx), cx);
+            }
+            return;
+        }
+        if self.keybase_inspector.open || self.splash_open {
+            window.focus(&self.focus_handle, cx);
             return;
         }
         if !matches!(
