@@ -1220,10 +1220,15 @@ fn reduce_backend_event(state: &mut UiState, event: BackendEvent) -> ReducerOutp
             // The backend ran the command instead of posting the text. Any
             // message it creates (e.g. the expanded `/shrug`) arrives
             // separately, so the optimistic copy must not linger as an unsent
-            // message. The daemon swallows command errors, so tell the user the
-            // command was at least handled.
+            // message. The daemon swallows command errors, so confirm that the
+            // command reached Keybase unless its result is already visible.
             remove_local_message(state, &pending_message_id_for_client(&client_message_id));
-            state.notifications.toasts.push(format!("Ran {command}"));
+            if !command_has_visible_result(&command) {
+                state
+                    .notifications
+                    .toasts
+                    .push(format!("Sent {command} to Keybase"));
+            }
         }
         BackendEvent::AttachmentUploadProgress {
             client_message_id,
@@ -2801,6 +2806,13 @@ fn discard_failed_message(state: &mut UiState, message_id: &MessageId) {
     }
 }
 
+/// `/me` and `/shrug` post their result as a normal message, so their toast
+/// would only duplicate what the conversation already shows.
+fn command_has_visible_result(command: &str) -> bool {
+    let name = command.strip_prefix('/').unwrap_or(command);
+    name.starts_with("me") || name.starts_with("shrug")
+}
+
 /// Removes an optimistic message that only exists on this client: a discarded
 /// send or one the backend handled as a command. Clears its sidebar preview
 /// even when the user navigated away before the acknowledgement, so a local id
@@ -3708,7 +3720,8 @@ mod tests {
                 .chain(&state.thread.replies)
                 .all(|message| message.send_state != MessageSendState::Failed)
         );
-        assert_eq!(state.notifications.toasts, vec!["Ran /shrug".to_string()]);
+        // The expanded shrug message is its own feedback.
+        assert!(state.notifications.toasts.is_empty());
         assert_eq!(
             state.workspace.channels[0]
                 .last_message
@@ -3767,7 +3780,10 @@ mod tests {
                 .chain(&state.thread.replies)
                 .all(|message| message.send_state != MessageSendState::Failed)
         );
-        assert_eq!(state.notifications.toasts, vec!["Ran /mute".to_string()]);
+        assert_eq!(
+            state.notifications.toasts,
+            vec!["Sent /mute to Keybase".to_string()]
+        );
     }
 
     #[test]

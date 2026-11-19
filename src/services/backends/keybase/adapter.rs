@@ -125,18 +125,22 @@ struct PendingSendMeta {
     command: Option<String>,
 }
 
-/// Keybase's built-in chat commands. A post whose first word is one of these
-/// may be run by the daemon instead of being stored as a message.
+/// Keybase's built-in chat command names and aliases. The daemon matches them
+/// with a plain prefix (`/shrugs` runs `/shrug`), so this must err broad: a
+/// real post returns an outbox id and never reaches the handled-command path.
 const BUILTIN_COMMAND_NAMES: &[&str] = &[
-    "me", "shrug", "flip", "mute", "msg", "collapse", "expand", "hide", "unhide", "headline",
-    "join", "leave", "location", "giphy", "clear",
+    "addemoji", "collapse", "dm", "expand", "flip", "giphy", "headline", "hide", "join", "leave",
+    "location", "me", "msg", "mute", "shh", "shrug", "topic", "unhide",
 ];
 
+/// Returns the word the user typed (including the slash) when the daemon may
+/// run the post as a built-in command.
 fn builtin_command_name(text: &str) -> Option<String> {
-    let name = text.strip_prefix('/')?.split_whitespace().next()?;
+    let rest = text.strip_prefix('/')?;
     BUILTIN_COMMAND_NAMES
-        .contains(&name)
-        .then(|| format!("/{name}"))
+        .iter()
+        .any(|name| rest.starts_with(name))
+        .then(|| text.split_whitespace().next().unwrap_or(text).to_string())
 }
 
 struct BackendTaskOutcome {
@@ -16692,10 +16696,30 @@ mod tests {
         assert_eq!(builtin_command_name("/shrug").as_deref(), Some("/shrug"));
         assert_eq!(builtin_command_name("/me waves").as_deref(), Some("/me"));
         assert_eq!(builtin_command_name("/mute  ").as_deref(), Some("/mute"));
+        // The daemon matches plain prefixes and aliases too.
+        assert_eq!(builtin_command_name("/shrugs").as_deref(), Some("/shrugs"));
+        assert_eq!(builtin_command_name("/meh").as_deref(), Some("/meh"));
+        assert_eq!(
+            builtin_command_name("/message hi").as_deref(),
+            Some("/message")
+        );
+        assert_eq!(builtin_command_name("/mutex").as_deref(), Some("/mutex"));
+        assert_eq!(builtin_command_name("/dm alice hi").as_deref(), Some("/dm"));
+        assert_eq!(builtin_command_name("/shh").as_deref(), Some("/shh"));
+        assert_eq!(
+            builtin_command_name("/topic elsewhere").as_deref(),
+            Some("/topic")
+        );
+        assert_eq!(
+            builtin_command_name("/addemoji party").as_deref(),
+            Some("/addemoji")
+        );
         // Unknown slash-prefixed text is posted normally and must still fail
         // loudly if the response unexpectedly lacks an outbox id.
         assert_eq!(builtin_command_name("/r/rust"), None);
-        assert_eq!(builtin_command_name("/shrugs"), None);
+        assert_eq!(builtin_command_name("/clear"), None);
+        // `hidden` does not prefix-match `hide`.
+        assert_eq!(builtin_command_name("/hidden"), None);
         assert_eq!(builtin_command_name("/Shrug"), None);
         assert_eq!(builtin_command_name("hello /shrug"), None);
     }
