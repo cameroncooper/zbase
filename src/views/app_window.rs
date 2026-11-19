@@ -7585,33 +7585,6 @@ impl AppWindow {
         window.focus(&self.sidebar_filter_input.focus_handle(cx), cx);
     }
 
-    pub(crate) fn back_click(
-        &mut self,
-        _: &ClickEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.navigate_back(window, cx);
-    }
-
-    pub(crate) fn forward_click(
-        &mut self,
-        _: &ClickEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.navigate_forward(window, cx);
-    }
-
-    pub(crate) fn home_click(
-        &mut self,
-        _: &ClickEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.navigate_to(self.active_workspace_route(), window, cx);
-    }
-
     pub(crate) fn activity_click(
         &mut self,
         _: &ClickEvent,
