@@ -721,10 +721,12 @@ impl SidebarHost for CachedSidebarView {
         });
     }
 
-    fn sidebar_toggle_quick_switcher(&mut self, cx: &mut Context<Self>) {
+    fn sidebar_toggle_quick_switcher(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let owner = self.owner.clone();
-        cx.defer(move |cx| {
-            let _ = owner.update(cx, |app_window, cx| app_window.toggle_quick_switcher(cx));
+        window.defer(cx, move |window, cx| {
+            let _ = owner.update(cx, |app_window, cx| {
+                app_window.toggle_quick_switcher(window, cx);
+            });
         });
     }
 
@@ -880,8 +882,8 @@ impl SidebarHost for AppWindow {
         self.set_sidebar_mode(mode, cx);
     }
 
-    fn sidebar_toggle_quick_switcher(&mut self, cx: &mut Context<Self>) {
-        self.toggle_quick_switcher(cx);
+    fn sidebar_toggle_quick_switcher(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.toggle_quick_switcher(window, cx);
     }
 
     fn sidebar_open_new_chat(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -3067,7 +3069,7 @@ impl AppWindow {
             }
             BenchScriptScenario::QuickSwitcher => {
                 if !self.models.overlay.quick_switcher_open {
-                    self.toggle_quick_switcher(cx);
+                    self.toggle_quick_switcher(window, cx);
                 }
                 if self.bench_script_step.is_multiple_of(12) {
                     let queries = ["", "g", "ge", "gen", "general", "", "a", "al", "test"];
@@ -8960,7 +8962,9 @@ impl AppWindow {
         }
     }
 
-    pub(crate) fn toggle_quick_switcher(&mut self, cx: &mut Context<Self>) {
+    /// Opens or closes the quick switcher, moving focus into its input when it
+    /// opens and back to the chat when it closes.
+    pub(crate) fn toggle_quick_switcher(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.models.overlay.new_chat_open || self.models.new_chat.open {
             self.dispatch_ui_action(UiAction::CloseNewChat);
         }
@@ -8971,6 +8975,11 @@ impl AppWindow {
         self.quick_switcher_query_seq = self.quick_switcher_query_seq.wrapping_add(1);
         self.sync_inputs_from_models(cx);
         self.refresh(cx);
+        if self.models.overlay.quick_switcher_open {
+            window.focus(&self.quick_switcher_input.focus_handle(cx), cx);
+        } else {
+            self.restore_chat_focus(window, cx);
+        }
     }
 
     pub(crate) fn toggle_find_in_chat(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -10274,12 +10283,7 @@ impl AppWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.toggle_quick_switcher(cx);
-        if self.models.overlay.quick_switcher_open {
-            window.focus(&self.quick_switcher_input.focus_handle(cx), cx);
-        } else {
-            self.restore_chat_focus(window, cx);
-        }
+        self.toggle_quick_switcher(window, cx);
     }
 
     fn open_new_chat_action(

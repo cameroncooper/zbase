@@ -411,7 +411,7 @@ impl ToolbarButton {
                         ToolbarAction::Order => {
                             this.sidebar_toggle_menu(SidebarMenu::Order, window, cx)
                         }
-                        ToolbarAction::Search => this.sidebar_toggle_quick_switcher(cx),
+                        ToolbarAction::Search => this.sidebar_toggle_quick_switcher(window, cx),
                         ToolbarAction::NewChat => this.sidebar_open_new_chat(window, cx),
                         ToolbarAction::Updates => this.sidebar_show_updates(window, cx),
                     }
@@ -467,7 +467,7 @@ pub trait SidebarHost: SidebarRowHost {
     );
     fn sidebar_show_updates(&mut self, window: &mut Window, cx: &mut Context<Self>);
     fn sidebar_set_mode(&mut self, mode: SidebarMode, cx: &mut Context<Self>);
-    fn sidebar_toggle_quick_switcher(&mut self, cx: &mut Context<Self>);
+    fn sidebar_toggle_quick_switcher(&mut self, window: &mut Window, cx: &mut Context<Self>);
     fn sidebar_open_new_chat(&mut self, window: &mut Window, cx: &mut Context<Self>);
     fn sidebar_open_preferences(&mut self, window: &mut Window, cx: &mut Context<Self>);
     /// Opens the signed-in user's own profile.
