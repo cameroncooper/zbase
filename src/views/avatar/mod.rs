@@ -10,8 +10,6 @@ use gpui_kit::{
 };
 use std::path::PathBuf;
 
-pub const ME_AVATAR_ASSET: &str = "assets/avatars/me.svg";
-
 pub struct Avatar;
 
 /// Every avatar is a rounded square; the kind only decides how its initials read.

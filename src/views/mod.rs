@@ -1040,10 +1040,6 @@ pub(crate) fn icon_asset(path: &'static str, size: f32, color: u32) -> AnyElemen
         .into_any_element()
 }
 
-pub fn home_icon(color: u32) -> AnyElement {
-    icon_asset("assets/icons/home.svg", 18., color)
-}
-
 pub fn dm_icon(color: u32) -> AnyElement {
     icon_asset("assets/icons/dm.svg", 18., color)
 }
